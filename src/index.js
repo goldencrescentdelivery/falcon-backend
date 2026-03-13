@@ -48,7 +48,10 @@ app.use('/api/poc',        require('./routes/poc'))
 app.use('/api/analytics',  require('./routes/analytics'))
 app.use('/api/deliveries', require('./routes/deliveries'))
 app.use('/api/backup',     require('./routes/backup'))
+<<<<<<< HEAD
 app.use('/api/vehicles',   require('./routes/vehicles'))
+=======
+>>>>>>> 990c42be8e5ed8214b91d3de93e4df84c6ab273b
 
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }))

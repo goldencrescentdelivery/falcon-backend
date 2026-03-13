@@ -9,6 +9,7 @@
     "migrate": "node src/db/migrate.js",
     "seed": "node src/db/seed.js",
     "migrate2": "node src/db/migrate2.js",
+<<<<<<< HEAD
     "migrate3": "node src/db/migrate3.js",
     "seed:poc": "node src/db/seed_poc_accounts.js",
     "backup": "node src/db/backup.js"
@@ -26,6 +27,23 @@
     "morgan": "^1.10.0",
     "pg": "^8.20.0",
     "socket.io": "^4.7.2"
+=======
+    "backup": "node src/db/backup.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "pg": "^8.11.3",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "socket.io": "^4.7.2",
+    "express-validator": "^7.0.1",
+    "morgan": "^1.10.0",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.5",
+    "date-fns": "^3.6.0"
+>>>>>>> 990c42be8e5ed8214b91d3de93e4df84c6ab273b
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
