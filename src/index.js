@@ -10,22 +10,38 @@ const rateLimit  = require('express-rate-limit')
 const app    = express()
 const server = http.createServer(app)
 
+// Allow multiple origins — handles both Vercel preview URLs and custom domain
+const ALLOWED_ORIGINS = [
+  'https://app.goldencrescent.ae',
+  'https://goldencrescent.ae',
+  process.env.FRONTEND_URL,
+  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
+].filter(Boolean)
+
+function corsOrigin(origin, callback) {
+  // Allow requests with no origin (mobile apps, curl, Postman)
+  if (!origin) return callback(null, true)
+  // Allow any vercel.app preview URL for this project
+  if (origin.includes('vercel.app') || origin.includes('goldencrescent.ae')) {
+    return callback(null, true)
+  }
+  if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true)
+  // In development allow localhost
+  if (process.env.NODE_ENV !== 'production' && origin.includes('localhost')) {
+    return callback(null, true)
+  }
+  return callback(new Error('Not allowed by CORS'))
+}
+
 // ── Socket.io ─────────────────────────────────────────────────
 const io = new Server(server, {
-  cors: {
-    origin: process.env.FRONTEND_URL || '*',
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    credentials: true,
-  }
+  cors: { origin: corsOrigin, methods: ['GET','POST','PUT','PATCH','DELETE'], credentials: true }
 })
 require('./socket')(io)
 
 // ── Middleware ─────────────────────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
-app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
-  credentials: true,
-}))
+app.use(cors({ origin: corsOrigin, credentials: true }))
 app.use(express.json())
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
 
@@ -48,10 +64,7 @@ app.use('/api/poc',        require('./routes/poc'))
 app.use('/api/analytics',  require('./routes/analytics'))
 app.use('/api/deliveries', require('./routes/deliveries'))
 app.use('/api/backup',     require('./routes/backup'))
-<<<<<<< HEAD
 app.use('/api/vehicles',   require('./routes/vehicles'))
-=======
->>>>>>> 990c42be8e5ed8214b91d3de93e4df84c6ab273b
 
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }))
@@ -69,5 +82,5 @@ app.use((err, _req, res, _next) => {
 const PORT = process.env.PORT || 4000
 server.listen(PORT, () => {
   console.log(`🚀 GCD API running on port ${PORT}`)
-  console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL || '*'}`)
+  console.log(`🔗 Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`)
 })
