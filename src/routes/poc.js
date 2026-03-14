@@ -93,7 +93,6 @@ router.post('/announcements', auth, requireRole('admin','manager','poc'), async 
 })
 
 module.exports = router
-<<<<<<< HEAD
 
 // PUT /api/poc/announcements/:id
 router.put('/announcements/:id', auth, requireRole('admin','manager','poc'), async (req, res) => {
@@ -113,5 +112,3 @@ router.delete('/announcements/:id', auth, requireRole('admin','manager','poc'), 
     res.json({ message: 'Deleted' })
   } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })
-=======
->>>>>>> 990c42be8e5ed8214b91d3de93e4df84c6ab273b

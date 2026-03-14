@@ -9,7 +9,7 @@ router.get('/summary', auth, requireRole('admin','manager','finance'), async (re
       query(`SELECT COUNT(*) FILTER (WHERE status='present') present, COUNT(*) FILTER (WHERE status='absent') absent FROM attendance WHERE date=CURRENT_DATE`),
       query(`SELECT COUNT(*) c FROM leaves WHERE status='pending'`),
       query(`SELECT COUNT(*) c, COALESCE(SUM(amount),0) total FROM compliance_fines WHERE status='pending'`),
-      query(`SELECT COALESCE(SUM(total),0) total FROM daily_deliveries WHERE date=CURRENT_DATE`),
+      query(`SELECT COALESCE(SUM(total),0) total FROM daily_deliveries WHERE date=CURRENT_DATE`).catch(()=>({rows:[{total:0}]})),
     ])
     const payrollMonth = new Date().toISOString().slice(0,7)
     const payroll = await query(`
@@ -23,7 +23,7 @@ router.get('/summary', auth, requireRole('admin','manager','finance'), async (re
       employees:        empCount.rows[0],
       attendance:       attToday.rows[0],
       pending_leaves:   pendingLeaves.rows[0].c,
-      today_deliveries: parseInt(todayDeliveries.rows[0].total),
+      today_deliveries: parseInt(todayDeliveries.rows[0].total||0),
       compliance: { pending_fines: pendingFines.rows[0].c, pending_amount: pendingFines.rows[0].total },
       payroll: payroll.rows[0],
     })
@@ -33,26 +33,35 @@ router.get('/summary', auth, requireRole('admin','manager','finance'), async (re
 // GET /api/analytics/deliveries-chart?months=6
 router.get('/deliveries-chart', auth, requireRole('admin','manager','finance'), async (req, res) => {
   try {
-    const months = parseInt(req.query.months)||6
-    const result = await query(`
-      SELECT TO_CHAR(date,'YYYY-MM') month, station_code,
-        SUM(total) total_deliveries, SUM(successful) successful, SUM(returned) returned
-      FROM daily_deliveries
-      WHERE date >= NOW() - INTERVAL '${months} months'
-      GROUP BY TO_CHAR(date,'YYYY-MM'), station_code ORDER BY month ASC`)
+    const months = parseInt(req.query.months) || 6
+    // Calculate cutoff in JS to avoid PostgreSQL INTERVAL syntax issues
+    const cutoff = new Date()
+    cutoff.setMonth(cutoff.getMonth() - months)
+    const cutoffStr = cutoff.toISOString().slice(0, 10)
 
-    // Build month-keyed object
+    const result = await query(`
+      SELECT
+        TO_CHAR(date, 'YYYY-MM') AS mon,
+        station_code,
+        SUM(total)               AS total_deliveries,
+        SUM(successful)          AS successful,
+        SUM(returned)            AS returned
+      FROM daily_deliveries
+      WHERE date >= $1
+      GROUP BY TO_CHAR(date, 'YYYY-MM'), station_code
+      ORDER BY mon ASC
+    `, [cutoffStr])
+
     const map = {}
     for (const r of result.rows) {
-      if (!map[r.month]) map[r.month] = { month: r.month, total:0, DDB7:0, DDB6:0, DSH6:0, DXD3:0 }
-      map[r.month][r.station_code] = parseInt(r.total_deliveries)
-      map[r.month].total += parseInt(r.total_deliveries)
+      if (!map[r.mon]) map[r.mon] = { month: r.mon, total: 0, DDB7: 0, DDB6: 0, DSH6: 0, DXD3: 0 }
+      map[r.mon][r.station_code] = parseInt(r.total_deliveries)
+      map[r.mon].total += parseInt(r.total_deliveries)
     }
     res.json({ chart: Object.values(map) })
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
-// GET /api/analytics/station-stats
 router.get('/station-stats', auth, requireRole('admin','manager'), async (req, res) => {
   try {
     const result = await query(`

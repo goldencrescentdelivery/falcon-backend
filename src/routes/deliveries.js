@@ -2,77 +2,65 @@ const router = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
 
-// GET /api/deliveries?month=2024-12&station=DDB7
 router.get('/', auth, async (req, res) => {
   try {
     const { month, station, from, to } = req.query
     let sql  = `SELECT d.*, u.name AS logged_by_name FROM daily_deliveries d LEFT JOIN users u ON d.logged_by=u.id WHERE 1=1`
     const vals = []
-
     if (station) { vals.push(station); sql += ` AND d.station_code=$${vals.length}` }
     if (month)   { vals.push(`${month}%`); sql += ` AND d.date::TEXT LIKE $${vals.length}` }
     if (from)    { vals.push(from); sql += ` AND d.date >= $${vals.length}` }
     if (to)      { vals.push(to);   sql += ` AND d.date <= $${vals.length}` }
-
-    // POC only sees their station
     if (req.user.role === 'poc') {
-      const emp = await query('SELECT station_code FROM employees WHERE id=$1', [req.user.emp_id])
-      const sc  = emp.rows[0]?.station_code || 'DDB7'
+      const sc = req.user.station_code || 'DDB7'
       vals.push(sc); sql += ` AND d.station_code=$${vals.length}`
     }
-
     sql += ' ORDER BY d.date DESC'
     const result = await query(sql, vals)
     res.json({ deliveries: result.rows })
-  } catch (err) {
-    console.error(err); res.status(500).json({ error: 'Server error' })
-  }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
-// GET /api/deliveries/monthly-summary — for analytics chart
 router.get('/monthly-summary', auth, requireRole('admin','manager','finance'), async (req, res) => {
   try {
     const months = parseInt(req.query.months) || 6
+    const cutoff = new Date()
+    cutoff.setMonth(cutoff.getMonth() - months)
+    const cutoffStr = cutoff.toISOString().slice(0,10)
     const result = await query(`
       SELECT
-        TO_CHAR(date,'YYYY-MM')  AS month,
+        TO_CHAR(date,'YYYY-MM') AS month,
         station_code,
-        SUM(total)               AS total_deliveries,
-        SUM(successful)          AS successful,
-        SUM(returned)            AS returned,
-        COUNT(*)                 AS days_logged
+        SUM(total)              AS total_deliveries,
+        SUM(successful)         AS successful,
+        SUM(returned)           AS returned,
+        COUNT(*)                AS days_logged
       FROM daily_deliveries
-      WHERE date >= NOW() - INTERVAL '${months} months'
+      WHERE date >= $1
       GROUP BY TO_CHAR(date,'YYYY-MM'), station_code
       ORDER BY month ASC, station_code
-    `)
-
-    // Pivot by month
+    `, [cutoffStr])
     const byMonth = {}
     for (const row of result.rows) {
       if (!byMonth[row.month]) byMonth[row.month] = { month: row.month, total: 0 }
       byMonth[row.month][row.station_code] = parseInt(row.total_deliveries)
       byMonth[row.month].total += parseInt(row.total_deliveries)
     }
-
     res.json({ summary: Object.values(byMonth), raw: result.rows })
-  } catch (err) {
-    console.error(err); res.status(500).json({ error: 'Server error' })
-  }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
-// POST /api/deliveries — POC logs daily deliveries
 router.post('/', auth, requireRole('admin','manager','poc'), async (req, res) => {
   try {
     const { station_code, date, total, attempted, successful, returned, notes } = req.body
     if (!total && total !== 0) return res.status(400).json({ error: 'total required' })
 
-    // POC auto-assigned their station
+    // Always resolve station_code — never allow null
     let sc = station_code
     if (req.user.role === 'poc') {
-      const emp = await query('SELECT station_code FROM employees WHERE id=$1', [req.user.emp_id])
-      sc = emp.rows[0]?.station_code || station_code || 'DDB7'
+      sc = req.user.station_code || 'DDB7'
     }
+    if (!sc) sc = 'DDB7'
 
     const result = await query(`
       INSERT INTO daily_deliveries (station_code, date, total, attempted, successful, returned, notes, logged_by)
@@ -84,9 +72,7 @@ router.post('/', auth, requireRole('admin','manager','poc'), async (req, res) =>
 
     req.io?.emit('deliveries:updated', result.rows[0])
     res.json({ delivery: result.rows[0] })
-  } catch (err) {
-    console.error(err); res.status(500).json({ error: 'Server error' })
-  }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
 module.exports = router
