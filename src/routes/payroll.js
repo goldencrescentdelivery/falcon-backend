@@ -124,3 +124,13 @@ router.post('/mark-paid', auth, requireRole('admin','finance'), async (req, res)
 })
 
 module.exports = router
+
+// DELETE /api/payroll/bonuses/:id
+router.delete('/bonuses/:id', auth, requireRole('admin','manager','finance'), async (req, res) => {
+  try {
+    const result = await query('DELETE FROM salary_bonuses WHERE id=$1 RETURNING *', [req.params.id])
+    if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
+    req.io?.emit('payroll:bonus_removed', result.rows[0])
+    res.json({ message: 'Bonus removed' })
+  } catch (err) { res.status(500).json({ error: 'Server error' }) }
+})
