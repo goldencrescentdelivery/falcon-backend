@@ -10,6 +10,10 @@ const rateLimit  = require('express-rate-limit')
 const app    = express()
 const server = http.createServer(app)
 
+// ── Trust Railway/Vercel proxy ────────────────────────────────
+// Required for rate-limit and correct IP detection behind Railway's load balancer
+app.set('trust proxy', 1)
+
 // ── Socket.io ─────────────────────────────────────────────────
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST','PUT','PATCH','DELETE'] }
@@ -18,13 +22,24 @@ require('./socket')(io)
 
 // ── Middleware ─────────────────────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
-app.use(cors())   // allow ALL origins — simplest possible, no env var needed
+app.use(cors())
 app.use(express.json())
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
 
 // Rate limiting
-app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 100, message: JSON.stringify({ error: 'Too many requests, please try again later' }) }))
-app.use('/api',      rateLimit({ windowMs: 60 * 1000, max: 300 }))
+app.use('/api/auth', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: JSON.stringify({ error: 'Too many requests, please try again later' })
+}))
+app.use('/api', rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+}))
 
 // Attach io to every request
 app.use((req, _res, next) => { req.io = io; next() })
