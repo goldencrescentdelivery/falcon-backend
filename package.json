@@ -10,7 +10,10 @@
     "seed": "node src/db/seed.js",
     "migrate2": "node src/db/migrate2.js",
     "migrate3": "node src/db/migrate3.js",
+    "migrate4": "node src/db/migrate4.js",
+    "migrate5": "node src/db/migrate5.js",
     "seed:poc": "node src/db/seed_poc_accounts.js",
+    "migrate4": "node src/db/migrate4.js",
     "backup": "node src/db/backup.js"
   },
   "dependencies": {
