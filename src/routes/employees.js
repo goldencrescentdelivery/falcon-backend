@@ -84,3 +84,51 @@ router.delete('/:id', auth, requireRole('admin'), async (req, res) => {
 })
 
 module.exports = router
+
+// POST /api/employees/:id/create-user — create login account for employee
+router.post('/:id/create-user', auth, requireRole('admin','manager'), async (req, res) => {
+  try {
+    const { email, password } = req.body
+    if (!email || !password) return res.status(400).json({ error: 'email and password required' })
+
+    const empRes = await query('SELECT * FROM employees WHERE id=$1', [req.params.id])
+    const emp    = empRes.rows[0]
+    if (!emp) return res.status(404).json({ error: 'Employee not found' })
+
+    const bcrypt = require('bcryptjs')
+    const hash   = await bcrypt.hash(password, 12)
+
+    // Determine role from employee role field
+    const roleMap = { 'Driver':'driver', 'HR Manager':'hr', 'Finance Mgr':'accountant', 'Accountant':'accountant', 'POC':'poc', 'Admin':'admin', 'Dispatcher':'general_manager', 'Manager':'manager', 'General Manager':'general_manager' }
+    const userRole = roleMap[emp.role] || 'driver'
+
+    const result = await query(`
+      INSERT INTO users (email, password_hash, plain_password, name, role, emp_id, station_code)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT (email) DO UPDATE SET
+        password_hash=$2, plain_password=$3, name=$4, role=$5, emp_id=$6, station_code=$7
+      RETURNING id,email,name,role,emp_id,station_code,status
+    `, [email.toLowerCase().trim(), hash, password, emp.name, userRole, emp.id, emp.station_code||null])
+
+    // Link user to employee
+    await query('UPDATE employees SET user_id=$1 WHERE id=$2', [result.rows[0].id, emp.id])
+
+    res.json({ user: result.rows[0] })
+  } catch (err) {
+    if (err.code==='23505') return res.status(409).json({ error: 'Email already exists' })
+    console.error(err); res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// PATCH /api/employees/:id/fields — quick field update
+router.patch('/:id/fields', auth, requireRole('admin','manager','hr'), async (req, res) => {
+  try {
+    const fields = req.body
+    const keys   = Object.keys(fields).filter(k => ['work_number','phone','project_type','per_shipment_rate','performance_bonus','salary','hourly_rate'].includes(k))
+    if (!keys.length) return res.status(400).json({ error: 'No valid fields' })
+    const sets   = keys.map((k,i) => `${k}=$${i+1}`).join(',')
+    const vals   = [...keys.map(k=>fields[k]), req.params.id]
+    const result = await query(`UPDATE employees SET ${sets},updated_at=NOW() WHERE id=$${vals.length} RETURNING *`, vals)
+    res.json({ employee: result.rows[0] })
+  } catch (err) { res.status(500).json({ error: 'Server error' }) }
+})

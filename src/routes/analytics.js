@@ -2,7 +2,7 @@ const router  = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
 
-router.get('/summary', auth, requireRole('admin','manager','finance'), async (req, res) => {
+router.get('/summary', auth, requireRole('admin','manager','general_manager','hr','accountant','finance'), async (req, res) => {
   try {
     const [empCount, attToday, pendingLeaves, pendingFines, todayDeliveries] = await Promise.all([
       query(`SELECT COUNT(*) c, COUNT(*) FILTER (WHERE status='active') active FROM employees`),
@@ -31,7 +31,7 @@ router.get('/summary', auth, requireRole('admin','manager','finance'), async (re
 })
 
 // GET /api/analytics/deliveries-chart?months=6
-router.get('/deliveries-chart', auth, requireRole('admin','manager','finance'), async (req, res) => {
+router.get('/deliveries-chart', auth, requireRole('admin','manager','general_manager','hr','accountant','finance'), async (req, res) => {
   try {
     const months = parseInt(req.query.months) || 6
     // Calculate cutoff in JS to avoid PostgreSQL INTERVAL syntax issues
@@ -62,7 +62,7 @@ router.get('/deliveries-chart', auth, requireRole('admin','manager','finance'), 
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
-router.get('/station-stats', auth, requireRole('admin','manager'), async (req, res) => {
+router.get('/station-stats', auth, requireRole('admin','manager','general_manager'), async (req, res) => {
   try {
     const result = await query(`
       SELECT station_code,
