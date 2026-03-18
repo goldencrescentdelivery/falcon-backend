@@ -12,7 +12,7 @@ router.get('/', auth, async (req, res) => {
     if (from)    { vals.push(from); sql += ` AND d.date >= $${vals.length}` }
     if (to)      { vals.push(to);   sql += ` AND d.date <= $${vals.length}` }
     if (req.user.role === 'poc') {
-      const sc = req.user.station_code || 'DDB7'
+      const sc = req.user.station_code || 'DDB1'
       vals.push(sc); sql += ` AND d.station_code=$${vals.length}`
     }
     sql += ' ORDER BY d.date DESC'
@@ -58,9 +58,9 @@ router.post('/', auth, requireRole('admin','manager','poc'), async (req, res) =>
     // Always resolve station_code — never allow null
     let sc = station_code
     if (req.user.role === 'poc') {
-      sc = req.user.station_code || 'DDB7'
+      sc = req.user.station_code || 'DDB1'
     }
-    if (!sc) sc = 'DDB7'
+    if (!sc) sc = 'DDB1'
 
     const result = await query(`
       INSERT INTO daily_deliveries (station_code, date, total, attempted, successful, returned, notes, logged_by)

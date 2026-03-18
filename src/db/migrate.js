@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   name          TEXT NOT NULL,
-  role          TEXT NOT NULL CHECK (role IN ('admin','manager','general_manager','hr','accountant','poc','driver')),
+  role          TEXT NOT NULL CHECK (role IN ('admin','manager','finance','poc','driver')),
   emp_id        TEXT,
   created_at    TIMESTAMPTZ DEFAULT NOW(),
   updated_at    TIMESTAMPTZ DEFAULT NOW()

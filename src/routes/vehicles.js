@@ -20,7 +20,7 @@ router.post('/', auth, requireRole('admin','manager','poc'), async (req, res) =>
   try {
     const { plate, make, model, year, station_code, status, grounded_reason, grounded_since, grounded_until, notes } = req.body
     if (!plate) return res.status(400).json({ error: 'Plate number required' })
-    const sc = req.user.role === 'poc' ? req.user.station_code : (station_code || 'DDB7')
+    const sc = req.user.role === 'poc' ? req.user.station_code : (station_code || 'DDB1')
     const result = await query(`
       INSERT INTO vehicles (plate,make,model,year,station_code,status,grounded_reason,grounded_since,grounded_until,notes)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *

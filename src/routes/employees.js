@@ -5,33 +5,19 @@ const { auth, requireRole } = require('../middleware/auth')
 router.get('/', auth, async (req, res) => {
   try {
     const { dept, status, search, station_code } = req.query
-    const page   = Math.max(1, parseInt(req.query.page)  || 1)
-    const limit  = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50))
-    const offset = (page - 1) * limit
-
-    const conditions = ['1=1']
+    let sql    = 'SELECT * FROM employees WHERE 1=1'
     const vals = []
-    if (dept)         { vals.push(dept);        conditions.push(`dept=$${vals.length}`) }
-    if (status)       { vals.push(status);       conditions.push(`status=$${vals.length}`) }
-    if (station_code) { vals.push(station_code); conditions.push(`station_code=$${vals.length}`) }
+    if (dept)         { vals.push(dept);        sql += ` AND dept=$${vals.length}` }
+    if (status)       { vals.push(status);       sql += ` AND status=$${vals.length}` }
+    if (station_code) { vals.push(station_code); sql += ` AND station_code=$${vals.length}` }
     if (search) {
       vals.push(`%${search.toLowerCase()}%`)
-      conditions.push(`(LOWER(name) LIKE $${vals.length} OR LOWER(id) LIKE $${vals.length} OR LOWER(COALESCE(amazon_id,'')) LIKE $${vals.length})`)
+      sql += ` AND (LOWER(name) LIKE $${vals.length} OR LOWER(id) LIKE $${vals.length} OR LOWER(COALESCE(amazon_id,'')) LIKE $${vals.length})`
     }
-    if (req.user.role === 'driver') { vals.push(req.user.emp_id); conditions.push(`id=$${vals.length}`) }
-
-    const where = conditions.join(' AND ')
-
-    const countResult = await query(`SELECT COUNT(*) FROM employees WHERE ${where}`, vals)
-    const total = parseInt(countResult.rows[0].count)
-
-    vals.push(limit);  const limitParam  = vals.length
-    vals.push(offset); const offsetParam = vals.length
-    const result = await query(
-      `SELECT * FROM employees WHERE ${where} ORDER BY name LIMIT $${limitParam} OFFSET $${offsetParam}`,
-      vals
-    )
-    res.json({ employees: result.rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } })
+    if (req.user.role === 'driver') { vals.push(req.user.emp_id); sql += ` AND id=$${vals.length}` }
+    sql += ' ORDER BY name'
+    const result = await query(sql, vals)
+    res.json({ employees: result.rows })
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
@@ -48,7 +34,7 @@ router.get('/:id', auth, async (req, res) => {
 router.post('/', auth, requireRole('admin','manager'), async (req, res) => {
   try {
     const { id,name,role,dept,status='active',salary=0,joined,phone,nationality,zone,
-      visa_expiry,license_expiry,avatar='👤',station,station_code='DDB7',
+      visa_expiry,license_expiry,avatar='👤',station,station_code='DDB1',
       hourly_rate=3.85,iloe_expiry,annual_leave_start,amazon_id,emirates_id,annual_leave_balance=30 } = req.body
     if (!id||!name||!role||!dept) return res.status(400).json({ error: 'id, name, role, dept required' })
     const result = await query(`
@@ -79,7 +65,7 @@ router.put('/:id', auth, requireRole('admin','manager','poc'), async (req, res) 
         amazon_id=$18,emirates_id=$19,annual_leave_balance=$20,updated_at=NOW()
       WHERE id=$21 RETURNING *`,
       [name,role,dept,status,salary,joined||null,phone||null,nationality||null,zone||null,
-       visa_expiry||null,license_expiry||null,avatar||'👤',station||null,station_code||'DDB7',
+       visa_expiry||null,license_expiry||null,avatar||'👤',station||null,station_code||'DDB1',
        hourly_rate||3.85,iloe_expiry||null,annual_leave_start||null,amazon_id||null,
        emirates_id||null,annual_leave_balance||30,req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
@@ -117,12 +103,12 @@ router.post('/:id/create-user', auth, requireRole('admin','manager'), async (req
     const userRole = roleMap[emp.role] || 'driver'
 
     const result = await query(`
-      INSERT INTO users (email, password_hash, name, role, emp_id, station_code)
-      VALUES ($1,$2,$3,$4,$5,$6)
+      INSERT INTO users (email, password_hash, plain_password, name, role, emp_id, station_code)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
       ON CONFLICT (email) DO UPDATE SET
-        password_hash=$2, name=$3, role=$4, emp_id=$5, station_code=$6
+        password_hash=$2, plain_password=$3, name=$4, role=$5, emp_id=$6, station_code=$7
       RETURNING id,email,name,role,emp_id,station_code,status
-    `, [email.toLowerCase().trim(), hash, emp.name, userRole, emp.id, emp.station_code||null])
+    `, [email.toLowerCase().trim(), hash, password, emp.name, userRole, emp.id, emp.station_code||null])
 
     // Link user to employee
     await query('UPDATE employees SET user_id=$1 WHERE id=$2', [result.rows[0].id, emp.id])
