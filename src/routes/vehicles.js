@@ -91,7 +91,7 @@ router.get('/assignments', auth, async (req, res) => {
 })
 
 // POST /api/vehicles/assignments
-router.post('/assignments', auth, requireRole('admin','manager','poc'), async (req, res) => {
+router.post('/assignments', auth, requireRole('admin','manager','general_manager','poc'), async (req, res) => {
   try {
     const { vehicle_id, emp_id, date, station_code, notes } = req.body
     const sc = req.user.role === 'poc' ? req.user.station_code : station_code
