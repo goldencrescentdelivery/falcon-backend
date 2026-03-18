@@ -2,6 +2,9 @@ const router  = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
 
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/
+function validAmount(v) { const n = Number(v); return !isNaN(n) && n > 0 }
+
 // GET /api/payroll?month=2024-12&emp_id=
 router.get('/', auth, async (req, res) => {
   try {
@@ -52,6 +55,8 @@ router.post('/deductions', auth, requireRole('admin','manager','finance'), async
     const VALID_TYPES = ['traffic_fine','iloe_fee','iloe_fine','cash_variance','other']
     if (!VALID_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid deduction type' })
     if (!emp_id || !month || !amount) return res.status(400).json({ error: 'emp_id, month, amount required' })
+    if (!MONTH_RE.test(month)) return res.status(400).json({ error: 'month must be YYYY-MM' })
+    if (!validAmount(amount)) return res.status(400).json({ error: 'amount must be a positive number' })
 
     const result = await query(`
       INSERT INTO salary_deductions (emp_id, month, type, amount, description, reference, added_by)
@@ -82,6 +87,8 @@ router.post('/bonuses', auth, requireRole('admin','manager','finance'), async (r
   try {
     const { emp_id, month, type='bonus', amount, description } = req.body
     if (!emp_id || !month || !amount) return res.status(400).json({ error: 'emp_id, month, amount required' })
+    if (!MONTH_RE.test(month)) return res.status(400).json({ error: 'month must be YYYY-MM' })
+    if (!validAmount(amount)) return res.status(400).json({ error: 'amount must be a positive number' })
 
     const result = await query(`
       INSERT INTO salary_bonuses (emp_id, month, type, amount, description, added_by)
@@ -99,6 +106,8 @@ router.post('/bonuses', auth, requireRole('admin','manager','finance'), async (r
 router.post('/mark-paid', auth, requireRole('admin','finance'), async (req, res) => {
   try {
     const { emp_id, month } = req.body
+    if (!emp_id || !month) return res.status(400).json({ error: 'emp_id and month required' })
+    if (!MONTH_RE.test(month)) return res.status(400).json({ error: 'month must be YYYY-MM' })
     // Recalculate totals on the fly
     const emp = await query('SELECT salary FROM employees WHERE id=$1', [emp_id])
     const bon = await query(`SELECT COALESCE(SUM(amount),0) t FROM salary_bonuses WHERE emp_id=$1 AND month=$2`, [emp_id, month])

@@ -5,19 +5,33 @@ const { auth, requireRole } = require('../middleware/auth')
 router.get('/', auth, async (req, res) => {
   try {
     const { dept, status, search, station_code } = req.query
-    let sql    = 'SELECT * FROM employees WHERE 1=1'
+    const page   = Math.max(1, parseInt(req.query.page)  || 1)
+    const limit  = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50))
+    const offset = (page - 1) * limit
+
+    const conditions = ['1=1']
     const vals = []
-    if (dept)         { vals.push(dept);        sql += ` AND dept=$${vals.length}` }
-    if (status)       { vals.push(status);       sql += ` AND status=$${vals.length}` }
-    if (station_code) { vals.push(station_code); sql += ` AND station_code=$${vals.length}` }
+    if (dept)         { vals.push(dept);        conditions.push(`dept=$${vals.length}`) }
+    if (status)       { vals.push(status);       conditions.push(`status=$${vals.length}`) }
+    if (station_code) { vals.push(station_code); conditions.push(`station_code=$${vals.length}`) }
     if (search) {
       vals.push(`%${search.toLowerCase()}%`)
-      sql += ` AND (LOWER(name) LIKE $${vals.length} OR LOWER(id) LIKE $${vals.length} OR LOWER(COALESCE(amazon_id,'')) LIKE $${vals.length})`
+      conditions.push(`(LOWER(name) LIKE $${vals.length} OR LOWER(id) LIKE $${vals.length} OR LOWER(COALESCE(amazon_id,'')) LIKE $${vals.length})`)
     }
-    if (req.user.role === 'driver') { vals.push(req.user.emp_id); sql += ` AND id=$${vals.length}` }
-    sql += ' ORDER BY name'
-    const result = await query(sql, vals)
-    res.json({ employees: result.rows })
+    if (req.user.role === 'driver') { vals.push(req.user.emp_id); conditions.push(`id=$${vals.length}`) }
+
+    const where = conditions.join(' AND ')
+
+    const countResult = await query(`SELECT COUNT(*) FROM employees WHERE ${where}`, vals)
+    const total = parseInt(countResult.rows[0].count)
+
+    vals.push(limit);  const limitParam  = vals.length
+    vals.push(offset); const offsetParam = vals.length
+    const result = await query(
+      `SELECT * FROM employees WHERE ${where} ORDER BY name LIMIT $${limitParam} OFFSET $${offsetParam}`,
+      vals
+    )
+    res.json({ employees: result.rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } })
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
@@ -103,12 +117,12 @@ router.post('/:id/create-user', auth, requireRole('admin','manager'), async (req
     const userRole = roleMap[emp.role] || 'driver'
 
     const result = await query(`
-      INSERT INTO users (email, password_hash, plain_password, name, role, emp_id, station_code)
-      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      INSERT INTO users (email, password_hash, name, role, emp_id, station_code)
+      VALUES ($1,$2,$3,$4,$5,$6)
       ON CONFLICT (email) DO UPDATE SET
-        password_hash=$2, plain_password=$3, name=$4, role=$5, emp_id=$6, station_code=$7
+        password_hash=$2, name=$3, role=$4, emp_id=$5, station_code=$6
       RETURNING id,email,name,role,emp_id,station_code,status
-    `, [email.toLowerCase().trim(), hash, password, emp.name, userRole, emp.id, emp.station_code||null])
+    `, [email.toLowerCase().trim(), hash, emp.name, userRole, emp.id, emp.station_code||null])
 
     // Link user to employee
     await query('UPDATE employees SET user_id=$1 WHERE id=$2', [result.rows[0].id, emp.id])

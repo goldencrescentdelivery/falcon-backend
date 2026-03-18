@@ -15,14 +15,15 @@ const server = http.createServer(app)
 app.set('trust proxy', 1)
 
 // ── Socket.io ─────────────────────────────────────────────────
+const ALLOWED_ORIGIN = process.env.FRONTEND_URL || 'http://localhost:3000'
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET','POST','PUT','PATCH','DELETE'] }
+  cors: { origin: ALLOWED_ORIGIN, methods: ['GET','POST','PUT','PATCH','DELETE'] }
 })
 require('./socket')(io)
 
 // ── Middleware ─────────────────────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
-app.use(cors())
+app.use(cors({ origin: ALLOWED_ORIGIN, credentials: true }))
 app.use(express.json())
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
 
