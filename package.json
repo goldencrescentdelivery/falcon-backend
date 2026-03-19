@@ -1,7 +1,7 @@
 {
   "name": "gcd-backend",
   "version": "1.0.0",
-  "description": "Golden Crescent Delivery – Node.js API",
+  "description": "Golden Crescent Delivery \u2013 Node.js API",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -13,8 +13,8 @@
     "migrate4": "node src/db/migrate4.js",
     "migrate5": "node src/db/migrate5.js",
     "seed:poc": "node src/db/seed_poc_accounts.js",
-    "migrate4": "node src/db/migrate4.js",
-    "backup": "node src/db/backup.js"
+    "backup": "node src/db/backup.js",
+    "migrate9": "node src/db/migrate9.js"
   },
   "dependencies": {
     "express": "^4.18.2",
@@ -28,7 +28,9 @@
     "morgan": "^1.10.0",
     "helmet": "^7.1.0",
     "express-rate-limit": "^7.1.5",
-    "date-fns": "^3.6.0"
+    "date-fns": "^3.6.0",
+    "multer": "^1.4.5-lts.1",
+    "@supabase/supabase-js": "^2.39.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

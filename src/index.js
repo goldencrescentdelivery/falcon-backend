@@ -59,6 +59,7 @@ app.use('/api/backup',     require('./routes/backup'))
 app.use('/api/vehicles',   require('./routes/vehicles'))
 app.use('/api/documents',  require('./routes/documents'))
 app.use('/api/sims',       require('./routes/sims'))
+app.use('/api/handovers',  require('./routes/handovers'))
 
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }))
@@ -77,3 +78,39 @@ const PORT = process.env.PORT || 4000
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 GCD API running on port ${PORT}`)
 })
+
+// ── Daily photo cleanup (runs every 24h) ──────────────────────
+async function runPhotoCleanup() {
+  try {
+    const { query } = require('./db/pool')
+    const { createClient } = require('@supabase/supabase-js')
+    const expired = await query(`
+      SELECT id, photo_1, photo_2, photo_3, photo_4
+      FROM vehicle_handovers
+      WHERE photos_expire_at < NOW()
+        AND photos_cleaned = false
+        AND (photo_1 IS NOT NULL OR photo_2 IS NOT NULL OR photo_3 IS NOT NULL OR photo_4 IS NOT NULL)
+    `)
+    if (!expired.rows.length) return
+
+    const supabaseUrl = process.env.SUPABASE_URL
+    const supabaseKey = process.env.SUPABASE_SERVICE_KEY
+    if (!supabaseUrl || !supabaseKey) return
+
+    const supabase = createClient(supabaseUrl, supabaseKey)
+
+    for (const row of expired.rows) {
+      const paths = [row.photo_1,row.photo_2,row.photo_3,row.photo_4]
+        .filter(Boolean)
+        .map(url => { const m=url.match(/vehicle-photos\/(.+)/); return m?m[1]:null })
+        .filter(Boolean)
+      if (paths.length) await supabase.storage.from('vehicle-photos').remove(paths)
+      await query(`UPDATE vehicle_handovers SET photo_1=NULL,photo_2=NULL,photo_3=NULL,photo_4=NULL,photos_cleaned=true,updated_at=NOW() WHERE id=$1`, [row.id])
+    }
+    console.log(`🧹 Auto-cleanup: removed photos from ${expired.rows.length} handovers`)
+  } catch(e) { console.error('Cleanup error:', e.message) }
+}
+
+// Run cleanup on startup + every 24 hours
+runPhotoCleanup()
+setInterval(runPhotoCleanup, 24 * 60 * 60 * 1000)
