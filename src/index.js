@@ -83,7 +83,8 @@ server.listen(PORT, '0.0.0.0', () => {
 async function runPhotoCleanup() {
   try {
     const { query } = require('./db/pool')
-    const { createClient } = require('@supabase/supabase-js')
+    let createClient
+    try { createClient = require('@supabase/supabase-js').createClient } catch(e) { return }
     const expired = await query(`
       SELECT id, photo_1, photo_2, photo_3, photo_4
       FROM vehicle_handovers
