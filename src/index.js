@@ -60,6 +60,10 @@ app.use('/api/vehicles',   require('./routes/vehicles'))
 app.use('/api/documents',  require('./routes/documents'))
 app.use('/api/sims',       require('./routes/sims'))
 app.use('/api/handovers',  require('./routes/handovers'))
+app.use('/api/performance', require('./routes/performance'))
+app.use('/api/shifts',      require('./routes/shifts'))
+app.use('/api/damage',      require('./routes/damage'))
+app.use('/api/advances',    require('./routes/advances'))
 
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }))
