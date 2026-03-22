@@ -46,7 +46,7 @@ router.get('/', auth, async (req, res) => {
 })
 
 // POST /api/payroll/deductions – add a deduction
-router.post('/deductions', auth, requireRole('admin','manager','finance'), async (req, res) => {
+router.post('/deductions', auth, requireRole('admin','manager','accountant','general_manager'), async (req, res) => {
   try {
     const { emp_id, month, type, amount, description, reference } = req.body
     const VALID_TYPES = ['traffic_fine','iloe_fee','iloe_fine','cash_variance','other']
@@ -66,7 +66,7 @@ router.post('/deductions', auth, requireRole('admin','manager','finance'), async
 })
 
 // DELETE /api/payroll/deductions/:id
-router.delete('/deductions/:id', auth, requireRole('admin','finance'), async (req, res) => {
+router.delete('/deductions/:id', auth, requireRole('admin','manager','accountant'), async (req, res) => {
   try {
     const result = await query('DELETE FROM salary_deductions WHERE id=$1 RETURNING *', [req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
@@ -78,7 +78,7 @@ router.delete('/deductions/:id', auth, requireRole('admin','finance'), async (re
 })
 
 // POST /api/payroll/bonuses
-router.post('/bonuses', auth, requireRole('admin','manager','finance'), async (req, res) => {
+router.post('/bonuses', auth, requireRole('admin','manager','accountant','general_manager'), async (req, res) => {
   try {
     const { emp_id, month, type='bonus', amount, description } = req.body
     if (!emp_id || !month || !amount) return res.status(400).json({ error: 'emp_id, month, amount required' })
@@ -96,7 +96,7 @@ router.post('/bonuses', auth, requireRole('admin','manager','finance'), async (r
 })
 
 // POST /api/payroll/mark-paid
-router.post('/mark-paid', auth, requireRole('admin','finance'), async (req, res) => {
+router.post('/mark-paid', auth, requireRole('admin','manager','accountant'), async (req, res) => {
   try {
     const { emp_id, month } = req.body
     // Recalculate totals on the fly
@@ -126,7 +126,7 @@ router.post('/mark-paid', auth, requireRole('admin','finance'), async (req, res)
 module.exports = router
 
 // DELETE /api/payroll/bonuses/:id
-router.delete('/bonuses/:id', auth, requireRole('admin','manager','finance'), async (req, res) => {
+router.delete('/bonuses/:id', auth, requireRole('admin','manager','accountant','general_manager'), async (req, res) => {
   try {
     const result = await query('DELETE FROM salary_bonuses WHERE id=$1 RETURNING *', [req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
