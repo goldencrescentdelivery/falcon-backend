@@ -3,7 +3,16 @@ const bcrypt  = require('bcryptjs')
 const jwt     = require('jsonwebtoken')
 const { query } = require('../db/pool')
 
-const JWT_SECRET  = process.env.JWT_SECRET || 'gcd-dev-secret-2024'
+const JWT_SECRET = process.env.JWT_SECRET
+if (!JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('FATAL: JWT_SECRET environment variable is not set')
+    process.exit(1)
+  } else {
+    console.warn('WARNING: JWT_SECRET not set — using insecure dev fallback. Set it in .env')
+  }
+}
+const _JWT_SECRET = JWT_SECRET || 'dev-only-insecure-secret-set-JWT_SECRET-env-var'
 const VALID_ROLES = ['admin','manager','general_manager','hr','accountant','poc','driver']
 
 /* ── inline auth middleware (no external dependency issues) ── */
@@ -11,7 +20,7 @@ function verifyToken(req, res, next) {
   const h = req.headers.authorization
   if (!h || !h.startsWith('Bearer ')) return res.status(401).json({ error:'Authentication required' })
   try {
-    req.user = jwt.verify(h.slice(7), JWT_SECRET)
+    req.user = jwt.verify(h.slice(7), _JWT_SECRET)
     next()
   } catch(e) {
     if (e.name === 'TokenExpiredError') return res.status(401).json({ error:'Session expired. Please log in again.' })
@@ -66,7 +75,7 @@ router.post('/login', async (req, res) => {
     attempts.delete(email)
     const token = jwt.sign(
       { id:user.id, email:user.email, name:user.name, role:user.role, emp_id:user.emp_id, station_code:user.station_code },
-      JWT_SECRET, { expiresIn:'8h' }
+      _JWT_SECRET, { expiresIn:'8h' }
     )
     res.json({ token, user:{ id:user.id, email:user.email, name:user.name, role:user.role, emp_id:user.emp_id, station_code:user.station_code, status:user.status } })
   } catch(e) { console.error('LOGIN ERROR:', e.message, e.stack); res.status(500).json({ error:'Server error: '+e.message }) }
