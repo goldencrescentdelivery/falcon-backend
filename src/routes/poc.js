@@ -1,6 +1,7 @@
 const router  = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
+const V = require('../middleware/validate')
 
 // GET /api/poc/drivers — POC sees their station's drivers
 router.get('/drivers', auth, requireRole('poc','admin','manager'), async (req, res) => {
@@ -69,7 +70,7 @@ router.get('/announcements', auth, async (req, res) => {
 })
 
 // POST /api/poc/announcements
-router.post('/announcements', auth, requireRole('admin','manager','poc'), async (req, res) => {
+router.post('/announcements', auth, V.validateAnnouncement, requireRole('admin','manager','poc'), async (req, res) => {
   try {
     const { title, body, station } = req.body
     if (!title || !body) return res.status(400).json({ error: 'title and body required' })
@@ -95,7 +96,7 @@ router.post('/announcements', auth, requireRole('admin','manager','poc'), async 
 module.exports = router
 
 // PUT /api/poc/announcements/:id
-router.put('/announcements/:id', auth, requireRole('admin','manager','poc'), async (req, res) => {
+router.put('/announcements/:id', auth, V.validateParams({ id: 'uuid' }), V.validateAnnouncement, requireRole('admin','manager','poc'), async (req, res) => {
   try {
     const { title, body } = req.body
     const result = await query(`UPDATE announcements SET title=$1, body=$2, updated_at=NOW() WHERE id=$3 RETURNING *`, [title, body, req.params.id])

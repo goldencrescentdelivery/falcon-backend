@@ -1,6 +1,7 @@
 const router  = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
+const V = require('../middleware/validate')
 
 router.get('/', auth, async (req, res) => {
   try {
@@ -21,7 +22,7 @@ router.get('/', auth, async (req, res) => {
   }
 })
 
-router.post('/', auth, async (req, res) => {
+router.post('/', auth, V.validateExpense, async (req, res) => {
   try {
     const { emp_id, category, amount, date, description } = req.body
     const actualEmpId = req.user.role === 'driver' ? req.user.emp_id : emp_id

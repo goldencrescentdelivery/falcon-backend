@@ -1,6 +1,7 @@
 const router = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
+const V = require('../middleware/validate')
 
 // GET /api/shifts?week=YYYY-MM-DD&station_code=
 router.get('/', auth, async (req, res) => {
@@ -24,7 +25,7 @@ router.get('/', auth, async (req, res) => {
 })
 
 // POST /api/shifts — assign/update shift
-router.post('/', auth, requireRole('admin','manager','general_manager','poc'), async (req, res) => {
+router.post('/', auth, V.validateShift, requireRole('admin','manager','general_manager','poc'), async (req, res) => {
   try {
     const { emp_id, shift_date, shift_type, cycle, notes, station_code } = req.body
     const sc = req.user.role === 'poc' ? req.user.station_code : (station_code || 'DDB1')

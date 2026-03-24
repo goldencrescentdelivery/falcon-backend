@@ -1,6 +1,7 @@
 const router  = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
+const V = require('../middleware/validate')
 let multer
 try { multer = require('multer') } catch(e) {}
 let createClient
@@ -34,7 +35,7 @@ router.get('/', auth, async (req, res) => {
   } catch(err) { res.status(500).json({ error:'Server error' }) }
 })
 
-router.post('/', auth, upload.array('photos',4), async (req, res) => {
+router.post('/', auth, upload.array('photos',4), V.validateDamageReport, async (req, res) => {
   try {
     const { vehicle_id, description, severity, station_code } = req.body
     const emp_id = req.user.emp_id || req.body.emp_id
@@ -53,7 +54,7 @@ router.post('/', auth, upload.array('photos',4), async (req, res) => {
   } catch(err) { console.error(err); res.status(500).json({ error:'Server error' }) }
 })
 
-router.patch('/:id/review', auth, requireRole('admin','manager','poc'), async (req, res) => {
+router.patch('/:id/review', auth, V.validateParams({ id: 'uuid' }), V.validateDamageReview, requireRole('admin','manager','poc'), async (req, res) => {
   try {
     const { status, review_note, repair_cost, deduct_from_da } = req.body
     const result = await query(`

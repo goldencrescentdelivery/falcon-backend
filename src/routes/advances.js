@@ -1,6 +1,7 @@
 const router = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
+const V = require('../middleware/validate')
 
 router.get('/', auth, async (req, res) => {
   try {
@@ -13,7 +14,7 @@ router.get('/', auth, async (req, res) => {
   } catch(err) { res.status(500).json({ error:'Server error' }) }
 })
 
-router.post('/', auth, async (req, res) => {
+router.post('/', auth, V.validateAdvance, async (req, res) => {
   try {
     const { emp_id, amount, reason, month, deduct_month } = req.body
     const actualEmpId = req.user.role==='driver' ? req.user.emp_id : emp_id
@@ -26,7 +27,7 @@ router.post('/', auth, async (req, res) => {
   } catch(err) { res.status(500).json({ error:'Server error' }) }
 })
 
-router.patch('/:id', auth, requireRole('admin','manager','accountant'), async (req, res) => {
+router.patch('/:id', auth, V.validateParams({ id: 'uuid' }), V.validateAdvanceAction, requireRole('admin','manager','accountant'), async (req, res) => {
   try {
     const { status, review_note } = req.body
     const result = await query(`

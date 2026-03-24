@@ -1,6 +1,7 @@
 const router  = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
+const V = require('../middleware/validate')
 
 // GET /api/vehicles
 router.get('/', auth, async (req, res) => {
@@ -16,11 +17,11 @@ router.get('/', auth, async (req, res) => {
 })
 
 // POST /api/vehicles
-router.post('/', auth, requireRole('admin','manager','poc'), async (req, res) => {
+router.post('/', auth, V.validateVehicle, requireRole('admin','manager','poc'), async (req, res) => {
   try {
     const { plate, make, model, year, station_code, status, grounded_reason, grounded_since, grounded_until, notes } = req.body
     if (!plate) return res.status(400).json({ error: 'Plate number required' })
-    const sc = req.user.role === 'poc' ? req.user.station_code : (station_code || 'DDB1')
+    const sc = req.user.role === 'poc' ? req.user.station_code : (station_code || 'DDB7')
     const result = await query(`
       INSERT INTO vehicles (plate,make,model,year,station_code,status,grounded_reason,grounded_since,grounded_until,notes)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *
@@ -34,7 +35,7 @@ router.post('/', auth, requireRole('admin','manager','poc'), async (req, res) =>
 })
 
 // PUT /api/vehicles/:id
-router.put('/:id', auth, requireRole('admin','manager','poc'), async (req, res) => {
+router.put('/:id', auth, V.validateParams({ id: 'uuid' }), V.validateVehicle, requireRole('admin','manager','poc'), async (req, res) => {
   try {
     const { plate, make, model, year, station_code, status, grounded_reason, grounded_since, grounded_until, notes } = req.body
     const result = await query(`
@@ -91,7 +92,7 @@ router.get('/assignments', auth, async (req, res) => {
 })
 
 // POST /api/vehicles/assignments
-router.post('/assignments', auth, requireRole('admin','manager','general_manager','poc'), async (req, res) => {
+router.post('/assignments', auth, requireRole('admin','manager','poc'), async (req, res) => {
   try {
     const { vehicle_id, emp_id, date, station_code, notes } = req.body
     const sc = req.user.role === 'poc' ? req.user.station_code : station_code
