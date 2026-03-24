@@ -1,3 +1,7 @@
+const { securityHeaders, corsMiddleware } = require('./middleware/security_headers')
+app.use(securityHeaders)
+app.use(corsMiddleware)
+
 require('dotenv').config()
 const express    = require('express')
 const http       = require('http')
@@ -6,6 +10,7 @@ const cors       = require('cors')
 const helmet     = require('helmet')
 const morgan     = require('morgan')
 const rateLimit  = require('express-rate-limit')
+
 
 const app    = express()
 const server = http.createServer(app)
