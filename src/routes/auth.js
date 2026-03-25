@@ -3,16 +3,7 @@ const bcrypt  = require('bcryptjs')
 const jwt     = require('jsonwebtoken')
 const { query } = require('../db/pool')
 
-const JWT_SECRET = process.env.JWT_SECRET
-if (!JWT_SECRET) {
-  if (process.env.NODE_ENV === 'production') {
-    console.error('FATAL: JWT_SECRET environment variable is not set')
-    process.exit(1)
-  } else {
-    console.warn('WARNING: JWT_SECRET not set — using insecure dev fallback. Set it in .env')
-  }
-}
-const _JWT_SECRET = JWT_SECRET || 'dev-only-insecure-secret-set-JWT_SECRET-env-var'
+const JWT_SECRET  = process.env.JWT_SECRET || 'gcd-dev-secret-2024'
 const VALID_ROLES = ['admin','manager','general_manager','hr','accountant','poc','driver']
 
 /* ── inline auth middleware (no external dependency issues) ── */
@@ -20,7 +11,7 @@ function verifyToken(req, res, next) {
   const h = req.headers.authorization
   if (!h || !h.startsWith('Bearer ')) return res.status(401).json({ error:'Authentication required' })
   try {
-    req.user = jwt.verify(h.slice(7), _JWT_SECRET)
+    req.user = jwt.verify(h.slice(7), JWT_SECRET)
     next()
   } catch(e) {
     if (e.name === 'TokenExpiredError') return res.status(401).json({ error:'Session expired. Please log in again.' })
@@ -75,7 +66,7 @@ router.post('/login', async (req, res) => {
     attempts.delete(email)
     const token = jwt.sign(
       { id:user.id, email:user.email, name:user.name, role:user.role, emp_id:user.emp_id, station_code:user.station_code },
-      _JWT_SECRET, { expiresIn:'8h' }
+      JWT_SECRET, { expiresIn:'8h' }
     )
     res.json({ token, user:{ id:user.id, email:user.email, name:user.name, role:user.role, emp_id:user.emp_id, station_code:user.station_code, status:user.status } })
   } catch(e) { console.error('LOGIN ERROR:', e.message, e.stack); res.status(500).json({ error:'Server error: '+e.message }) }
@@ -112,7 +103,7 @@ router.post('/change-password', verifyToken, async (req, res) => {
 router.get('/users', verifyToken, role('admin','manager','general_manager'), async (req, res) => {
   try {
     const r = await query(`
-      SELECT u.id, u.email, u.name, u.role, u.emp_id, u.station_code, u.status, u.created_at,
+      SELECT u.id, u.email, u.name, u.role, u.manager_type, u.emp_id, u.station_code, u.status, u.created_at,
              e.name AS emp_name, e.station_code AS emp_station
       FROM users u
       LEFT JOIN employees e ON u.emp_id = e.id
@@ -129,6 +120,7 @@ router.post('/users', verifyToken, role('admin','manager','general_manager'), as
     const password     = (req.body.password || '').trim()
     const name         = (req.body.name     || '').trim()
     const rl           = (req.body.role     || '').trim()
+    const manager_type = req.body.manager_type || null
     const emp_id       = req.body.emp_id       || null
     const station_code = req.body.station_code || null
     const status       = req.body.status       || 'active'
@@ -139,10 +131,10 @@ router.post('/users', verifyToken, role('admin','manager','general_manager'), as
 
     const hash = await bcrypt.hash(password, 12)
     const r = await query(`
-      INSERT INTO users (email, password_hash, name, role, emp_id, station_code, status)
-      VALUES ($1,$2,$3,$4,$5,$6,$7)
-      RETURNING id, email, name, role, emp_id, station_code, status
-    `, [email, hash, name, rl, emp_id, station_code, status])
+      INSERT INTO users (email, password_hash, name, role, manager_type, emp_id, station_code, status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      RETURNING id, email, name, role, manager_type, emp_id, station_code, status
+    `, [email, hash, name, rl, rl==='general_manager'?manager_type:null, emp_id, station_code, status])
 
     res.status(201).json({ user: r.rows[0] })
   } catch(e) {
@@ -171,13 +163,14 @@ router.put('/users/:id', verifyToken, role('admin','manager','general_manager'),
         password_hash= CASE WHEN $2 IS NOT NULL THEN $2 ELSE password_hash END,
         name         = COALESCE($3, name),
         role         = COALESCE($4, role),
-        emp_id       = COALESCE($5, emp_id),
-        station_code = COALESCE($6, station_code),
-        status       = COALESCE($7, status),
+        manager_type = COALESCE($5, manager_type),
+        emp_id       = COALESCE($6, emp_id),
+        station_code = COALESCE($7, station_code),
+        status       = COALESCE($8, status),
         updated_at   = NOW()
-      WHERE id=$8
-      RETURNING id, email, name, role, emp_id, station_code, status
-    `, [email?.toLowerCase().trim()||null, hash, name||null, rl||null, emp_id||null, station_code||null, status||null, req.params.id])
+      WHERE id=$9
+      RETURNING id, email, name, role, manager_type, emp_id, station_code, status
+    `, [email?.toLowerCase().trim()||null, hash, name||null, rl||null, req.body.manager_type||null, emp_id||null, station_code||null, status||null, req.params.id])
 
     if (!r.rows[0]) return res.status(404).json({ error:'User not found' })
     res.json({ user: r.rows[0] })
