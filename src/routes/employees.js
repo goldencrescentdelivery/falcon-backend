@@ -22,6 +22,19 @@ router.get('/', auth, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
+// GET /api/employees/work-number/history — full assignment log (must be before /:id)
+router.get('/work-number/history', auth, requireRole('admin','manager','general_manager','hr'), async (req, res) => {
+  try {
+    const { emp_id } = req.query
+    let sql = `SELECT * FROM work_number_history`
+    const vals = []
+    if (emp_id) { vals.push(emp_id); sql += ` WHERE emp_id=$1` }
+    sql += ' ORDER BY performed_at DESC LIMIT 200'
+    const result = await query(sql, vals)
+    res.json({ history: result.rows })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
 router.get('/:id', auth, V.validateParams({ id: 'id' }), async (req, res) => {
   try {
     if (req.user.role === 'driver' && req.user.emp_id !== req.params.id)
@@ -72,6 +85,95 @@ router.put('/:id', auth, requireRole('admin','manager','poc'), async (req, res) 
     if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
     req.io?.emit('employee:updated', result.rows[0])
     res.json({ employee: result.rows[0] })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
+// POST /api/employees/:id/assign-work-number
+router.post('/:id/assign-work-number', auth, requireRole('admin','manager','general_manager','poc','hr'), async (req, res) => {
+  const { phone_number, force = false } = req.body
+  const empId = req.params.id
+  try {
+    // 1. SIM must exist with this phone number
+    const simRes = await query(`SELECT * FROM sim_cards WHERE phone_number=$1`, [phone_number])
+    if (!simRes.rows[0]) return res.status(400).json({ error: 'Number not found in SIM cards' })
+    const sim = simRes.rows[0]
+
+    // 2. Target employee must exist
+    const empRes = await query(`SELECT * FROM employees WHERE id=$1`, [empId])
+    if (!empRes.rows[0]) return res.status(404).json({ error: 'Employee not found' })
+    const emp = empRes.rows[0]
+
+    // 3. Conflict check — SIM already assigned to someone else
+    if (sim.emp_id && sim.emp_id !== empId) {
+      if (!force) {
+        const prevRes = await query(`SELECT id, name FROM employees WHERE id=$1`, [sim.emp_id])
+        const prev = prevRes.rows[0]
+        return res.json({ conflict: true, conflictEmpId: prev?.id, conflictEmpName: prev?.name })
+      }
+      // Forced: strip number from previous employee & log removal
+      const prevRes = await query(`SELECT id, name FROM employees WHERE id=$1`, [sim.emp_id])
+      const prev = prevRes.rows[0]
+      await query(`UPDATE employees SET work_number=NULL WHERE id=$1`, [sim.emp_id])
+      await query(
+        `INSERT INTO work_number_history (emp_id,emp_name,phone_number,sim_id,action,prev_emp_id,prev_emp_name,performed_by)
+         VALUES ($1,$2,$3,$4,'removed',$5,$6,$7)`,
+        [prev?.id, prev?.name, phone_number, sim.id, emp.id, emp.name, req.user.id]
+      )
+      const prevUpdated = await query(`SELECT * FROM employees WHERE id=$1`, [sim.emp_id])
+      if (prevUpdated.rows[0]) req.io?.emit('employee:updated', prevUpdated.rows[0])
+    }
+
+    // 4. Release this employee's old SIM if different
+    if (emp.work_number && emp.work_number !== phone_number) {
+      await query(
+        `UPDATE sim_cards SET emp_id=NULL, status='available', assigned_at=NULL, assigned_by=NULL WHERE phone_number=$1`,
+        [emp.work_number]
+      )
+      await query(
+        `INSERT INTO work_number_history (emp_id,emp_name,phone_number,action,performed_by) VALUES ($1,$2,$3,'removed',$4)`,
+        [emp.id, emp.name, emp.work_number, req.user.id]
+      )
+    }
+
+    // 5. Assign
+    const action = (sim.emp_id && sim.emp_id !== empId) ? 'reassigned' : 'assigned'
+    await query(`UPDATE employees SET work_number=$1 WHERE id=$2`, [phone_number, empId])
+    await query(
+      `UPDATE sim_cards SET emp_id=$1, status='assigned', assigned_at=NOW(), assigned_by=$2 WHERE id=$3`,
+      [empId, req.user.id, sim.id]
+    )
+    await query(
+      `INSERT INTO work_number_history (emp_id,emp_name,phone_number,sim_id,action,performed_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [emp.id, emp.name, phone_number, sim.id, action, req.user.id]
+    )
+
+    const updated = await query(`SELECT * FROM employees WHERE id=$1`, [empId])
+    req.io?.emit('employee:updated', updated.rows[0])
+    res.json({ ok: true, employee: updated.rows[0] })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
+// DELETE /api/employees/:id/work-number — unassign work number
+router.delete('/:id/work-number', auth, requireRole('admin','manager','general_manager','poc','hr'), async (req, res) => {
+  try {
+    const empRes = await query(`SELECT * FROM employees WHERE id=$1`, [req.params.id])
+    if (!empRes.rows[0]) return res.status(404).json({ error: 'Not found' })
+    const emp = empRes.rows[0]
+    if (!emp.work_number) return res.json({ ok: true })
+
+    await query(
+      `UPDATE sim_cards SET emp_id=NULL, status='available', assigned_at=NULL, assigned_by=NULL WHERE phone_number=$1`,
+      [emp.work_number]
+    )
+    await query(
+      `INSERT INTO work_number_history (emp_id,emp_name,phone_number,action,performed_by) VALUES ($1,$2,$3,'removed',$4)`,
+      [emp.id, emp.name, emp.work_number, req.user.id]
+    )
+    await query(`UPDATE employees SET work_number=NULL WHERE id=$1`, [req.params.id])
+
+    const updated = await query(`SELECT * FROM employees WHERE id=$1`, [req.params.id])
+    req.io?.emit('employee:updated', updated.rows[0])
+    res.json({ ok: true })
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
