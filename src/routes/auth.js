@@ -100,7 +100,7 @@ router.post('/change-password', verifyToken, async (req, res) => {
 })
 
 /* ── GET /api/auth/users ── */
-router.get('/users', verifyToken, role('admin','manager','general_manager'), async (req, res) => {
+router.get('/users', verifyToken, role('admin','manager','general_manager','hr','accountant'), async (req, res) => {
   try {
     const r = await query(`
       SELECT u.id, u.email, u.name, u.role, u.manager_type, u.emp_id, u.station_code, u.status, u.created_at,
