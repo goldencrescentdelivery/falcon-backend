@@ -95,6 +95,14 @@ router.get('/assignments', auth, async (req, res) => {
 router.post('/assignments', auth, requireRole('admin','manager','poc'), async (req, res) => {
   try {
     const { vehicle_id, emp_id, date, station_code, notes } = req.body
+    // Only DAs (Driver role) can be assigned to vehicles
+    if (emp_id) {
+      const empCheck = await query('SELECT role FROM employees WHERE id=$1', [emp_id])
+      if (!empCheck.rows[0]) return res.status(400).json({ error: 'Employee not found' })
+      if ((empCheck.rows[0].role||'').toLowerCase() !== 'driver') {
+        return res.status(400).json({ error: 'Only Delivery Associates can be assigned to vehicles' })
+      }
+    }
     const sc = req.user.role === 'poc' ? req.user.station_code : station_code
     const result = await query(`
       INSERT INTO vehicle_assignments (vehicle_id, emp_id, date, station_code, notes, assigned_by)

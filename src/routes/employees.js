@@ -45,7 +45,7 @@ router.get('/:id', auth, V.validateParams({ id: 'id' }), async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })
 
-router.post('/', auth, requireRole('admin','manager'), async (req, res) => {
+router.post('/', auth, requireRole('admin','manager','general_manager','hr','accountant'), async (req, res) => {
   try {
     const { id,name,role,dept,status='active',salary=0,joined,phone,nationality,zone,
       visa_expiry,license_expiry,avatar='👤',station,station_code='DDB7',
@@ -67,7 +67,7 @@ router.post('/', auth, requireRole('admin','manager'), async (req, res) => {
   }
 })
 
-router.put('/:id', auth, requireRole('admin','manager','poc'), async (req, res) => {
+router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','hr','accountant'), async (req, res) => {
   try {
     const { name,role,dept,status,salary,joined,phone,nationality,zone,visa_expiry,
       license_expiry,avatar,station,station_code,hourly_rate,iloe_expiry,

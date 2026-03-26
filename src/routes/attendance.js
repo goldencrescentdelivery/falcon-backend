@@ -26,7 +26,7 @@ router.get('/', auth, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
-router.post('/', auth, requireRole('admin','manager','poc'), async (req, res) => {
+router.post('/', auth, requireRole('admin','manager','general_manager','poc','accountant'), async (req, res) => {
   try {
     const { emp_id, date, check_in, check_out, status, note, cycle, cycle_hours, is_rescue, rescue_hours, pay_type, daily_rate, worker_type } = req.body
     if (!emp_id || !status) return res.status(400).json({ error: 'emp_id and status required' })
@@ -73,7 +73,7 @@ router.post('/', auth, requireRole('admin','manager','poc'), async (req, res) =>
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
-router.patch('/:id/checkout', auth, requireRole('admin','manager','poc'), async (req, res) => {
+router.patch('/:id/checkout', auth, requireRole('admin','manager','general_manager','poc','accountant'), async (req, res) => {
   try {
     const time   = req.body.check_out || new Date().toTimeString().slice(0,5)
     const result = await query(`UPDATE attendance SET check_out=$1,updated_at=NOW() WHERE id=$2 RETURNING *`, [time, req.params.id])
@@ -82,7 +82,7 @@ router.patch('/:id/checkout', auth, requireRole('admin','manager','poc'), async 
   } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })
 
-router.get('/summary', auth, requireRole('admin','manager','finance'), async (req, res) => {
+router.get('/summary', auth, requireRole('admin','manager','general_manager','accountant'), async (req, res) => {
   try {
     const month = req.query.month || new Date().toISOString().slice(0,7)
     const result = await query(`
