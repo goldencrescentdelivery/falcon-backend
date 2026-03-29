@@ -42,6 +42,7 @@ app.use('/api/analytics',  require('./routes/analytics'))
 app.use('/api/deliveries', require('./routes/deliveries'))
 app.use('/api/backup',     require('./routes/backup'))
 app.use('/api/vehicles',   require('./routes/vehicles'))
+app.use('/api/petty-cash', require('./routes/petty-cash'))
 
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }))

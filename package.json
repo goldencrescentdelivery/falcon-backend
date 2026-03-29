@@ -14,7 +14,8 @@
     "migrate5": "node src/db/migrate5.js",
     "seed:poc": "node src/db/seed_poc_accounts.js",
     "backup": "node src/db/backup.js",
-    "migrate9": "node src/db/migrate9.js"
+    "migrate9": "node src/db/migrate9.js",
+    "migrate12": "node src/db/migrate12.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.2",
