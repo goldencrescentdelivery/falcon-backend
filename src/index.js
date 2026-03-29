@@ -70,6 +70,7 @@ app.use('/api/performance', require('./routes/performance'))
 app.use('/api/shifts',      require('./routes/shifts'))
 app.use('/api/damage',      require('./routes/damage'))
 app.use('/api/advances',    require('./routes/advances'))
+app.use('/api/petty-cash',  require('./routes/petty-cash'))
 
 // ── Health check ───────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status:'ok', ts:new Date().toISOString() }))
