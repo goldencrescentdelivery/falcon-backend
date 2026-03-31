@@ -36,11 +36,13 @@ router.post('/', auth, V.validateLeave, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })
 
-// PATCH /:id/status — POC approves for their station; admin/manager approve all
-router.patch('/:id/status', auth, requireRole('admin','manager','poc','hr'), async (req, res) => {
+// PATCH /:id/status — POC approves/rejects for their station
+router.patch('/:id/status', auth, requireRole('admin','general_manager','poc','hr'), async (req, res) => {
   try {
-    const { status, reason } = req.body
-    // POC can only approve leaves for their station
+    const { status } = req.body
+    if (!['approved','rejected'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
+
+    // POC can only action leaves for their station
     if (req.user.role === 'poc') {
       const check = await query(`
         SELECT l.id FROM leaves l JOIN employees e ON l.emp_id=e.id
@@ -48,16 +50,69 @@ router.patch('/:id/status', auth, requireRole('admin','manager','poc','hr'), asy
       `, [req.params.id, req.user.station_code])
       if (!check.rows[0]) return res.status(403).json({ error: 'Not your station' })
     }
+
     const result = await query(`
-      UPDATE leaves SET status=$1, approved_by_poc=$2, poc_station=$3, updated_at=NOW()
+      UPDATE leaves SET
+        poc_status      = $1,
+        poc_id          = $2,
+        poc_station     = $3,
+        approved_by_poc = $2,
+        hr_status       = CASE WHEN $1='approved' THEN 'pending' ELSE hr_status END,
+        status          = CASE WHEN $1='rejected' THEN 'rejected' ELSE status END,
+        updated_at      = NOW()
       WHERE id=$4 RETURNING *
     `, [status, req.user.id, req.user.station_code||null, req.params.id])
+
+    if (!result.rows[0]) return res.status(404).json({ error: 'Leave not found' })
     req.io?.emit('leave:updated', result.rows[0])
     res.json({ leave: result.rows[0] })
-  } catch (err) { res.status(500).json({ error: 'Server error' }) }
+  } catch (err) { console.error('LEAVE POC ERR:', err.message); res.status(500).json({ error: 'Server error' }) }
 })
 
-router.delete('/:id', auth, requireRole('admin','manager'), async (req, res) => {
+// PATCH /:id/hr — HR or General Manager approves/rejects (step 2)
+router.patch('/:id/hr', auth, requireRole('admin','general_manager','hr'), async (req, res) => {
+  try {
+    const { status } = req.body
+    if (!['approved','rejected'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
+
+    const result = await query(`
+      UPDATE leaves SET
+        hr_status     = $1,
+        hr_id         = $2,
+        mgr_status    = CASE WHEN $1='approved' THEN 'pending' ELSE mgr_status END,
+        status        = CASE WHEN $1='rejected' THEN 'rejected' ELSE status END,
+        updated_at    = NOW()
+      WHERE id=$3 RETURNING *
+    `, [status, req.user.id, req.params.id])
+
+    if (!result.rows[0]) return res.status(404).json({ error: 'Leave not found' })
+    req.io?.emit('leave:updated', result.rows[0])
+    res.json({ leave: result.rows[0] })
+  } catch (err) { console.error('LEAVE HR ERR:', err.message); res.status(500).json({ error: 'Server error' }) }
+})
+
+// PATCH /:id/manager — General Manager final sign-off (step 3)
+router.patch('/:id/manager', auth, requireRole('admin','general_manager'), async (req, res) => {
+  try {
+    const { status } = req.body
+    if (!['approved','rejected'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
+
+    const result = await query(`
+      UPDATE leaves SET
+        mgr_status  = $1,
+        mgr_id      = $2,
+        status      = $1,
+        updated_at  = NOW()
+      WHERE id=$3 RETURNING *
+    `, [status, req.user.id, req.params.id])
+
+    if (!result.rows[0]) return res.status(404).json({ error: 'Leave not found' })
+    req.io?.emit('leave:updated', result.rows[0])
+    res.json({ leave: result.rows[0] })
+  } catch (err) { console.error('LEAVE MGR ERR:', err.message); res.status(500).json({ error: 'Server error' }) }
+})
+
+router.delete('/:id', auth, requireRole('admin','general_manager'), async (req, res) => {
   try {
     await query('DELETE FROM leaves WHERE id=$1', [req.params.id])
     res.json({ message: 'Deleted' })
