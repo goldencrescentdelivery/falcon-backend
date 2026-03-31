@@ -91,8 +91,8 @@ router.patch('/:id/hr', auth, requireRole('admin','general_manager','hr'), async
   } catch (err) { console.error('LEAVE HR ERR:', err.message); res.status(500).json({ error: 'Server error' }) }
 })
 
-// PATCH /:id/manager — General Manager final sign-off (step 3)
-router.patch('/:id/manager', auth, requireRole('admin','general_manager'), async (req, res) => {
+// PATCH /:id/manager — Admin final sign-off (step 3)
+router.patch('/:id/manager', auth, requireRole('admin'), async (req, res) => {
   try {
     const { status } = req.body
     if (!['approved','rejected'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
