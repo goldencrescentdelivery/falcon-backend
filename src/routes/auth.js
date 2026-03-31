@@ -160,7 +160,7 @@ router.put('/users/:id', verifyToken, role('admin','manager','general_manager'),
     const r = await query(`
       UPDATE users SET
         email        = COALESCE($1, email),
-        password_hash= CASE WHEN $2 IS NOT NULL THEN $2 ELSE password_hash END,
+        password_hash= CASE WHEN $2::TEXT IS NOT NULL THEN $2::TEXT ELSE password_hash END,
         name         = COALESCE($3, name),
         role         = COALESCE($4, role),
         manager_type = COALESCE($5, manager_type),
