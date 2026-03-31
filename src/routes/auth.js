@@ -94,7 +94,8 @@ router.post('/change-password', verifyToken, async (req, res) => {
     if (!await bcrypt.compare(cur, r.rows[0].password_hash)) return res.status(401).json({ error:'Current password incorrect' })
 
     const hash = await bcrypt.hash(next, 12)
-    await query(`UPDATE users SET password_hash=$1, updated_at=NOW() WHERE id=$2`, [hash, req.user.id])
+    const upd = await query(`UPDATE users SET password_hash=$1 WHERE id=$2`, [hash, req.user.id])
+    if (upd.rowCount === 0) return res.status(500).json({ error:'Password update failed — user record not found in DB' })
     res.json({ message:'Password updated successfully' })
   } catch(e) { console.error('CHANGE-PW ERROR:', e.message); res.status(500).json({ error:'Server error: '+e.message }) }
 })
