@@ -27,13 +27,20 @@ router.post('/', auth, V.validateLeave, async (req, res) => {
   try {
     const { emp_id, type, from_date, to_date, days, reason } = req.body
     const actualEmpId = req.user.role === 'driver' ? req.user.emp_id : emp_id
+
+    // Non-DA roles skip POC + HR steps and go straight to Admin
+    const skipToAdmin = ['poc', 'accountant', 'hr', 'general_manager'].includes(req.user.role)
+    const pocSt  = skipToAdmin ? 'approved' : 'pending'
+    const hrSt   = skipToAdmin ? 'approved' : 'pending'
+    const mgrSt  = skipToAdmin ? 'pending'  : 'waiting'
+
     const result = await query(`
-      INSERT INTO leaves (emp_id, type, from_date, to_date, days, reason)
-      VALUES ($1,$2,$3,$4,$5,$6) RETURNING *
-    `, [actualEmpId, type, from_date, to_date, days, reason||null])
+      INSERT INTO leaves (emp_id, type, from_date, to_date, days, reason, poc_status, hr_status, mgr_status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *
+    `, [actualEmpId, type, from_date, to_date, days, reason||null, pocSt, hrSt, mgrSt])
     req.io?.emit('leave:created', result.rows[0])
     res.status(201).json({ leave: result.rows[0] })
-  } catch (err) { res.status(500).json({ error: 'Server error' }) }
+  } catch (err) { console.error('LEAVE CREATE ERR:', err.message); res.status(500).json({ error: 'Server error' }) }
 })
 
 // PATCH /:id/status — POC approves/rejects for their station
