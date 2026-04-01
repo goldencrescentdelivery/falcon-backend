@@ -183,12 +183,21 @@ router.put('/users/:id', verifyToken, role('admin','manager','general_manager'),
 })
 
 /* ── DELETE /api/auth/users/:id ── */
-router.delete('/users/:id', verifyToken, role('admin','manager'), async (req, res) => {
+router.delete('/users/:id', verifyToken, role('admin','general_manager'), async (req, res) => {
   try {
-    if (req.params.id === req.user.id) return res.status(400).json({ error:'Cannot delete your own account' })
+    if (String(req.params.id) === String(req.user.id)) return res.status(400).json({ error:'Cannot delete your own account' })
+    // Fetch linked emp_id before deleting
+    const userRes = await query(`SELECT emp_id FROM users WHERE id=$1`, [req.params.id])
+    if (!userRes.rows[0]) return res.status(404).json({ error:'User not found' })
+    const empId = userRes.rows[0].emp_id
+    // Delete user first (removes FK reference to employees)
     await query(`DELETE FROM users WHERE id=$1`, [req.params.id])
+    // Also delete the linked employee record
+    if (empId) {
+      await query(`DELETE FROM employees WHERE id=$1`, [empId])
+    }
     res.json({ message:'User deleted' })
-  } catch(e) { res.status(500).json({ error:'Server error: '+e.message }) }
+  } catch(e) { console.error('DELETE USER ERROR:', e.message); res.status(500).json({ error:'Server error: '+e.message }) }
 })
 
 module.exports = router

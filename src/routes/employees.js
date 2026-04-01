@@ -179,6 +179,8 @@ router.delete('/:id/work-number', auth, requireRole('admin','manager','general_m
 
 router.delete('/:id', auth, requireRole('admin'), async (req, res) => {
   try {
+    // Delete linked user account first (avoids FK constraint from users.emp_id → employees.id)
+    await query('DELETE FROM users WHERE emp_id=$1', [req.params.id])
     const result = await query('DELETE FROM employees WHERE id=$1 RETURNING id', [req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
     req.io?.emit('employee:deleted', { id: req.params.id })
