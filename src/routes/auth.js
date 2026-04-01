@@ -186,13 +186,41 @@ router.put('/users/:id', verifyToken, role('admin','manager','general_manager'),
 router.delete('/users/:id', verifyToken, role('admin','general_manager'), async (req, res) => {
   try {
     if (String(req.params.id) === String(req.user.id)) return res.status(400).json({ error:'Cannot delete your own account' })
-    // Fetch linked emp_id before deleting
     const userRes = await query(`SELECT emp_id FROM users WHERE id=$1`, [req.params.id])
     if (!userRes.rows[0]) return res.status(404).json({ error:'User not found' })
     const empId = userRes.rows[0].emp_id
-    // Delete user first (removes FK reference to employees)
-    await query(`DELETE FROM users WHERE id=$1`, [req.params.id])
-    // Also delete the linked employee record
+    const uid = req.params.id
+
+    // NULL out all FK references to this user across every table
+    const nullQueries = [
+      `UPDATE attendance          SET logged_by       = NULL WHERE logged_by       = $1`,
+      `UPDATE leaves              SET approved_by     = NULL WHERE approved_by     = $1`,
+      `UPDATE leaves              SET poc_id          = NULL WHERE poc_id          = $1`,
+      `UPDATE leaves              SET hr_id           = NULL WHERE hr_id           = $1`,
+      `UPDATE leaves              SET gm_id           = NULL WHERE gm_id           = $1`,
+      `UPDATE leaves              SET mgr_id          = NULL WHERE mgr_id          = $1`,
+      `UPDATE leaves              SET approved_by_poc = NULL WHERE approved_by_poc = $1`,
+      `UPDATE salary_deductions   SET added_by        = NULL WHERE added_by        = $1`,
+      `UPDATE salary_bonuses      SET added_by        = NULL WHERE added_by        = $1`,
+      `UPDATE payroll             SET paid_by         = NULL WHERE paid_by         = $1`,
+      `UPDATE expenses            SET approved_by     = NULL WHERE approved_by     = $1`,
+      `UPDATE announcements       SET posted_by       = NULL WHERE posted_by       = $1`,
+      `UPDATE shifts              SET assigned_by     = NULL WHERE assigned_by     = $1`,
+      `UPDATE damage_reports      SET reviewed_by     = NULL WHERE reviewed_by     = $1`,
+      `UPDATE salary_advances     SET reviewed_by     = NULL WHERE reviewed_by     = $1`,
+      `UPDATE daily_deliveries    SET logged_by       = NULL WHERE logged_by       = $1`,
+      `UPDATE payslip_exports     SET exported_by     = NULL WHERE exported_by     = $1`,
+      `UPDATE backup_log          SET triggered_by    = NULL WHERE triggered_by    = $1`,
+      `UPDATE sim_cards           SET assigned_by     = NULL WHERE assigned_by     = $1`,
+      `UPDATE vehicle_assignments SET assigned_by     = NULL WHERE assigned_by     = $1`,
+      `UPDATE employee_documents  SET uploaded_by     = NULL WHERE uploaded_by     = $1`,
+      `UPDATE employees           SET user_id         = NULL WHERE user_id         = $1`,
+    ]
+    for (const sql of nullQueries) {
+      try { await query(sql, [uid]) } catch(_) {}
+    }
+
+    await query(`DELETE FROM users WHERE id=$1`, [uid])
     if (empId) {
       await query(`DELETE FROM employees WHERE id=$1`, [empId])
     }
