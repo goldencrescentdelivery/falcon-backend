@@ -62,6 +62,34 @@ router.get('/deliveries-chart', auth, requireRole('admin','manager','general_man
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
+// GET /api/analytics/alerts — single DB round-trip for all sidebar badge counts
+router.get('/alerts', auth, async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT
+        (SELECT COUNT(*) FROM employees WHERE status != 'inactive'
+          AND (
+            (visa_expiry    IS NOT NULL AND visa_expiry    <= CURRENT_DATE + INTERVAL '30 days') OR
+            (license_expiry IS NOT NULL AND license_expiry <= CURRENT_DATE + INTERVAL '30 days') OR
+            (iloe_expiry    IS NOT NULL AND iloe_expiry    <= CURRENT_DATE + INTERVAL '30 days')
+          )
+        )::int AS expiring_docs,
+        (SELECT COUNT(*) FROM leaves    WHERE poc_status = 'pending')::int  AS pending_leaves,
+        (SELECT COUNT(*) FROM sims      WHERE status IN ('damaged','inactive'))::int AS sim_issues,
+        (SELECT COUNT(*) FROM vehicles  WHERE status IN ('grounded','maintenance'))::int AS fleet_issues
+    `)
+    const { expiring_docs, pending_leaves, sim_issues, fleet_issues } = result.rows[0]
+    res.json({
+      employees: expiring_docs,
+      leaves:    pending_leaves,
+      sims:      sim_issues,
+      fleet:     fleet_issues,
+      hr:        expiring_docs + pending_leaves,
+      poc:       fleet_issues + sim_issues + pending_leaves,
+    })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
 router.get('/station-stats', auth, requireRole('admin','manager','general_manager'), async (req, res) => {
   try {
     const result = await query(`
