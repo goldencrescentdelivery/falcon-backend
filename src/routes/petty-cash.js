@@ -10,8 +10,8 @@ router.get('/summary', auth, requireRole('admin','accountant','general_manager',
         u.id, u.name, u.role,
         COALESCE(SUM(CASE WHEN pc.type='allocation' THEN pc.amount ELSE 0 END), 0) AS total_allocated,
         COALESCE(SUM(CASE WHEN pc.type='expense'    THEN pc.amount ELSE 0 END), 0) AS total_spent,
-        COALESCE(SUM(CASE WHEN pc.type='expense'    THEN pc.amount ELSE 0 END), 0)
-          - COALESCE(SUM(CASE WHEN pc.type='allocation' THEN pc.amount ELSE 0 END), 0) AS balance,
+        COALESCE(SUM(CASE WHEN pc.type='allocation' THEN pc.amount ELSE 0 END), 0)
+          - COALESCE(SUM(CASE WHEN pc.type='expense' THEN pc.amount ELSE 0 END), 0) AS balance,
         COUNT(pc.id) AS transaction_count
       FROM users u
       LEFT JOIN petty_cash pc ON pc.user_id = u.id
@@ -39,7 +39,7 @@ router.get('/my', auth, async (req, res) => {
     const rows = result.rows
     const total_allocated = rows.filter(r => r.type === 'allocation').reduce((s, r) => s + Number(r.amount), 0)
     const total_spent     = rows.filter(r => r.type === 'expense').reduce((s, r) => s + Number(r.amount), 0)
-    const balance         = total_spent - total_allocated
+    const balance         = total_allocated - total_spent  // remaining cash on hand
 
     res.json({ records: rows, balance, total_allocated, total_spent })
   } catch (err) {
@@ -62,7 +62,7 @@ router.get('/user/:userId', auth, requireRole('admin','accountant','general_mana
     const rows = result.rows
     const total_allocated = rows.filter(r => r.type === 'allocation').reduce((s, r) => s + Number(r.amount), 0)
     const total_spent     = rows.filter(r => r.type === 'expense').reduce((s, r) => s + Number(r.amount), 0)
-    const balance         = total_spent - total_allocated
+    const balance         = total_allocated - total_spent  // remaining cash on hand
 
     res.json({ records: rows, balance, total_allocated, total_spent })
   } catch (err) {

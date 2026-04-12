@@ -177,6 +177,34 @@ router.delete('/:id/work-number', auth, requireRole('admin','manager','general_m
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
+// POST /api/employees/:id/create-user — create a login account linked to this employee
+router.post('/:id/create-user', auth, requireRole('admin','manager','general_manager'), async (req, res) => {
+  try {
+    const { email, password } = req.body
+    if (!email || !password) return res.status(400).json({ error: 'email and password required' })
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' })
+
+    const empRes = await query('SELECT * FROM employees WHERE id=$1', [req.params.id])
+    if (!empRes.rows[0]) return res.status(404).json({ error: 'Employee not found' })
+    const emp = empRes.rows[0]
+
+    const bcrypt = require('bcryptjs')
+    const hash   = await bcrypt.hash(password, 12)
+    const r = await query(`
+      INSERT INTO users (email, password_hash, name, role, emp_id, station_code, status)
+      VALUES ($1,$2,$3,'driver',$4,$5,'active')
+      RETURNING id, email, name, role, emp_id, station_code, status
+    `, [email.trim().toLowerCase(), hash, emp.name, emp.id, emp.station_code])
+
+    await query('UPDATE employees SET user_id=$1 WHERE id=$2', [r.rows[0].id, emp.id])
+
+    res.status(201).json({ user: r.rows[0] })
+  } catch(err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Email already exists' })
+    console.error(err); res.status(500).json({ error: 'Server error' })
+  }
+})
+
 router.delete('/:id', auth, requireRole('admin'), async (req, res) => {
   try {
     // Delete linked user account first (avoids FK constraint from users.emp_id → employees.id)

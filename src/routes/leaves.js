@@ -115,6 +115,16 @@ router.patch('/:id/manager', auth, requireRole('admin'), async (req, res) => {
     `, [status, req.user.id, req.params.id])
 
     if (!result.rows[0]) return res.status(404).json({ error: 'Leave not found' })
+
+    // Auto-decrement annual leave balance when Annual leave is fully approved
+    const leave = result.rows[0]
+    if (status === 'approved' && leave.type === 'Annual' && leave.days > 0) {
+      await query(
+        `UPDATE employees SET annual_leave_balance = GREATEST(0, annual_leave_balance - $1) WHERE id = $2`,
+        [leave.days, leave.emp_id]
+      ).catch(e => console.error('Leave balance update error:', e.message))
+    }
+
     req.io?.emit('leave:updated', result.rows[0])
     res.json({ leave: result.rows[0] })
   } catch (err) { console.error('LEAVE MGR ERR:', err.message); res.status(500).json({ error: 'Server error' }) }

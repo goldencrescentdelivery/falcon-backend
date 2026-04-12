@@ -82,6 +82,62 @@ router.patch('/:id/checkout', auth, requireRole('admin','manager','general_manag
   } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })
 
+// POST /api/attendance/bulk — log attendance for multiple employees at once
+router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc','accountant'), async (req, res) => {
+  try {
+    const { records } = req.body
+    if (!Array.isArray(records) || records.length === 0)
+      return res.status(400).json({ error: 'records array required' })
+    if (records.length > 100)
+      return res.status(400).json({ error: 'Maximum 100 records per bulk request' })
+
+    const results = []
+    for (const rec of records) {
+      const { emp_id, date, status, cycle, cycle_hours, is_rescue, rescue_hours, note, pay_type, daily_rate, worker_type } = rec
+      if (!emp_id || !status) continue
+
+      const empRes  = await query('SELECT hourly_rate, station_code FROM employees WHERE id=$1', [emp_id])
+      const emp     = empRes.rows[0]
+      const station = emp?.station_code || 'DDB7'
+
+      let earnings = null
+      let finalPayType   = pay_type || 'hourly'
+      let finalDailyRate = null
+      let hours = null
+
+      if (status === 'present') {
+        if (station === 'DDB6') {
+          finalPayType   = 'daily'
+          finalDailyRate = daily_rate || (worker_type === 'helper' ? 90 : 115)
+          earnings       = finalDailyRate
+        } else {
+          const rate = emp?.hourly_rate || 3.85
+          hours = cycle_hours != null ? parseFloat(cycle_hours) : (cycle ? { A:5,B:4,C:5,Beset:5,MR:4,FM:5 }[cycle] : null)
+          if (is_rescue && rescue_hours) hours = parseFloat(rescue_hours)
+          earnings = hours != null ? Math.round(hours * rate * 100) / 100 : null
+        }
+      }
+
+      const r = await query(`
+        INSERT INTO attendance (emp_id,date,status,note,logged_by,cycle,cycle_hours,hourly_rate,earnings,is_rescue,rescue_hours,pay_type,daily_rate,worker_type)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        ON CONFLICT (emp_id,date) DO UPDATE SET
+          status=$3,note=$4,logged_by=$5,cycle=$6,cycle_hours=$7,
+          hourly_rate=$8,earnings=$9,is_rescue=$10,rescue_hours=$11,pay_type=$12,daily_rate=$13,
+          worker_type=$14,updated_at=NOW()
+        RETURNING *`,
+        [emp_id, date||new Date().toISOString().slice(0,10), status, note||null, req.user.id,
+         cycle||null, hours, emp?.hourly_rate||null, earnings, is_rescue||false, rescue_hours||null,
+         finalPayType, finalDailyRate, worker_type||'driver'])
+
+      results.push(r.rows[0])
+      req.io?.emit('attendance:updated', r.rows[0])
+    }
+
+    res.json({ attendance: results, count: results.length })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
 router.get('/summary', auth, requireRole('admin','manager','general_manager','accountant'), async (req, res) => {
   try {
     const month = req.query.month || new Date().toISOString().slice(0,7)

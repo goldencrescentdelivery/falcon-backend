@@ -3,7 +3,7 @@ const bcrypt  = require('bcryptjs')
 const jwt     = require('jsonwebtoken')
 const { query } = require('../db/pool')
 
-const JWT_SECRET  = process.env.JWT_SECRET || 'gcd-dev-secret-2024'
+const JWT_SECRET  = process.env.JWT_SECRET || 'fallback-dev-secret-change-in-production'
 const VALID_ROLES = ['admin','manager','general_manager','hr','accountant','poc','driver']
 
 /* ── inline auth middleware (no external dependency issues) ── */
@@ -226,6 +226,21 @@ router.delete('/users/:id', verifyToken, role('admin','general_manager'), async 
     }
     res.json({ message:'User deleted' })
   } catch(e) { console.error('DELETE USER ERROR:', e.message); res.status(500).json({ error:'Server error: '+e.message }) }
+})
+
+/* ── POST /api/auth/refresh ── */
+router.post('/refresh', verifyToken, async (req, res) => {
+  try {
+    const r = await query(`SELECT id,email,name,role,emp_id,station_code,status FROM users WHERE id=$1`, [req.user.id])
+    if (!r.rows[0]) return res.status(404).json({ error:'User not found' })
+    if (r.rows[0].status === 'inactive') return res.status(403).json({ error:'Account disabled.' })
+    const user = r.rows[0]
+    const token = jwt.sign(
+      { id:user.id, email:user.email, name:user.name, role:user.role, emp_id:user.emp_id, station_code:user.station_code },
+      JWT_SECRET, { expiresIn:'8h' }
+    )
+    res.json({ token, user })
+  } catch(e) { console.error('REFRESH ERROR:', e.message); res.status(500).json({ error:'Server error' }) }
 })
 
 module.exports = router

@@ -93,8 +93,6 @@ router.post('/announcements', auth, V.validateAnnouncement, requireRole('admin',
   }
 })
 
-module.exports = router
-
 // PUT /api/poc/announcements/:id
 router.put('/announcements/:id', auth, V.validateParams({ id: 'uuid' }), V.validateAnnouncement, requireRole('admin','manager','poc'), async (req, res) => {
   try {
@@ -113,3 +111,5 @@ router.delete('/announcements/:id', auth, requireRole('admin','manager','poc'), 
     res.json({ message: 'Deleted' })
   } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })
+
+module.exports = router

@@ -2,8 +2,20 @@ const router = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
 
+const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour — recompute at most once per hour
+
 // Auto-compute score for a DA for a given month
 async function computeScore(empId, month) {
+  // Check cache — skip recompute if computed within TTL
+  const cached = await query(
+    `SELECT computed_at FROM da_performance WHERE emp_id=$1 AND month=$2`,
+    [empId, month]
+  )
+  if (cached.rows[0]?.computed_at) {
+    const age = Date.now() - new Date(cached.rows[0].computed_at).getTime()
+    if (age < CACHE_TTL_MS) return // still fresh — skip
+  }
+
   const [start, end] = [`${month}-01`, `${month}-31`]
 
   const [att, lv, ded, workdays] = await Promise.all([
@@ -12,7 +24,7 @@ async function computeScore(empId, month) {
            WHERE emp_id=$1 AND date>=$2 AND date<=$3`, [empId, start, end]),
     query(`SELECT COUNT(*) AS leaves FROM leaves WHERE emp_id=$1 AND status='approved'
            AND from_date>=$2 AND from_date<=$3`, [empId, start, end]),
-    query(`SELECT COALESCE(SUM(amount),0) AS total FROM payroll_deductions
+    query(`SELECT COALESCE(SUM(amount),0) AS total FROM salary_deductions
            WHERE emp_id=$1 AND month=$2`, [empId, month]),
     query(`SELECT COUNT(DISTINCT date) AS days FROM attendance WHERE emp_id=$1
            AND date>=$2 AND date<=$3`, [empId, start, end]),
@@ -50,8 +62,8 @@ router.get('/', auth, async (req, res) => {
     const month = req.query.month || new Date().toISOString().slice(0,7)
     const sc    = req.user.role === 'poc' ? req.user.station_code : req.query.station_code
 
-    // Compute scores for all relevant employees
-    let empQ = `SELECT id FROM employees WHERE status='active'`
+    // Compute scores for all relevant employees (cached — only recomputes if stale)
+    let empQ = `SELECT id FROM employees WHERE status='active' AND (role='Driver' OR dept='Operations')`
     const vals = []
     if (sc) { vals.push(sc); empQ += ` AND station_code=$${vals.length}` }
     const emps = await query(empQ, vals)

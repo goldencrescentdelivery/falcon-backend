@@ -38,8 +38,8 @@ router.patch('/:id', auth, V.validateParams({ id: 'uuid' }), V.validateAdvanceAc
     if (status==='approved' && result.rows[0]?.deduct_month) {
       const adv = result.rows[0]
       await query(`
-        INSERT INTO payroll_deductions (emp_id, type, amount, description, month)
-        VALUES ($1,'other',$2,'Salary Advance Recovery',$3)
+        INSERT INTO salary_deductions (emp_id, month, type, amount, description)
+        VALUES ($1,$3,'other',$2,'Salary Advance Recovery')
         ON CONFLICT DO NOTHING
       `, [adv.emp_id, adv.amount, adv.deduct_month]).catch(()=>{})
     }

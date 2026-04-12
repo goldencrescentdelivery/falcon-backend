@@ -54,7 +54,7 @@ router.get('/deliveries-chart', auth, requireRole('admin','manager','general_man
 
     const map = {}
     for (const r of result.rows) {
-      if (!map[r.mon]) map[r.mon] = { month: r.mon, total: 0, DDB1: 0, DXE6: 0, DDB1: 0, DXE6: 0 }
+      if (!map[r.mon]) map[r.mon] = { month: r.mon, total: 0, DDB1: 0, DXE6: 0 }
       map[r.mon][r.station_code] = parseInt(r.total_deliveries)
       map[r.mon].total += parseInt(r.total_deliveries)
     }
