@@ -11,9 +11,9 @@ router.get('/', auth, async (req, res) => {
     if (req.user.role === 'driver') {
       vals.push(req.user.emp_id); sql += ` AND l.emp_id=$${vals.length}`
     } else if (req.user.role === 'poc') {
-      // POC only sees their station's leaves that need their action
+      // POC sees their station's leaves; stage=all includes history
       vals.push(req.user.station_code); sql += ` AND e.station_code=$${vals.length}`
-      sql += ` AND l.poc_status='pending'`
+      if (req.query.stage !== 'all') sql += ` AND l.poc_status='pending'`
     } else {
       if (emp_id) { vals.push(emp_id); sql += ` AND l.emp_id=$${vals.length}` }
       if (status) { vals.push(status); sql += ` AND l.status=$${vals.length}` }

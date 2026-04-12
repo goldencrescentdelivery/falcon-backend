@@ -138,6 +138,55 @@ router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc'
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
+// PUT /api/attendance/:id — edit an existing record (recomputes earnings)
+router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','accountant'), async (req, res) => {
+  try {
+    const { status, note, cycle, cycle_hours, is_rescue, rescue_hours, pay_type, daily_rate, worker_type } = req.body
+    const existing = await query('SELECT * FROM attendance WHERE id=$1', [req.params.id])
+    if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' })
+    const rec = existing.rows[0]
+    const empRes = await query('SELECT hourly_rate, station_code FROM employees WHERE id=$1', [rec.emp_id])
+    const emp = empRes.rows[0]
+    const station = emp?.station_code || 'DDB7'
+    const newStatus = status ?? rec.status
+    let earnings = null, hours = null, finalPayType = pay_type ?? rec.pay_type, finalDailyRate = null
+    if (newStatus === 'present') {
+      if (station === 'DDB6') {
+        finalPayType   = 'daily'
+        finalDailyRate = daily_rate ?? (worker_type === 'helper' ? 90 : 115)
+        earnings       = finalDailyRate
+      } else {
+        const rate = emp?.hourly_rate || 3.85
+        hours = cycle_hours != null ? parseFloat(cycle_hours) : rec.cycle_hours
+        if ((is_rescue ?? rec.is_rescue) && (rescue_hours ?? rec.rescue_hours))
+          hours = parseFloat(rescue_hours ?? rec.rescue_hours)
+        earnings = hours != null ? Math.round(hours * rate * 100) / 100 : null
+      }
+    }
+    const result = await query(`
+      UPDATE attendance SET
+        status=$1, note=$2, cycle=$3, cycle_hours=$4,
+        earnings=$5, is_rescue=$6, rescue_hours=$7,
+        pay_type=$8, daily_rate=$9, worker_type=$10, updated_at=NOW()
+      WHERE id=$11 RETURNING *`,
+      [newStatus, note ?? rec.note, cycle ?? rec.cycle, hours,
+       earnings, is_rescue ?? rec.is_rescue, rescue_hours ?? rec.rescue_hours,
+       finalPayType, finalDailyRate, worker_type ?? rec.worker_type,
+       req.params.id])
+    req.io?.emit('attendance:updated', result.rows[0])
+    res.json({ attendance: result.rows[0] })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
+// DELETE /api/attendance/:id
+router.delete('/:id', auth, requireRole('admin','manager','general_manager','poc','accountant'), async (req, res) => {
+  try {
+    await query('DELETE FROM attendance WHERE id=$1', [req.params.id])
+    req.io?.emit('attendance:deleted', { id: req.params.id })
+    res.json({ message: 'Deleted' })
+  } catch (err) { res.status(500).json({ error: 'Server error' }) }
+})
+
 router.get('/summary', auth, requireRole('admin','manager','general_manager','accountant'), async (req, res) => {
   try {
     const month = req.query.month || new Date().toISOString().slice(0,7)
