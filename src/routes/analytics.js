@@ -5,7 +5,7 @@ const { auth, requireRole } = require('../middleware/auth')
 router.get('/summary', auth, requireRole('admin','manager','general_manager','hr','accountant','finance'), async (req, res) => {
   try {
     const [empCount, attToday, pendingLeaves, pendingFines, todayDeliveries] = await Promise.all([
-      query(`SELECT COUNT(*) c, COUNT(*) FILTER (WHERE status='active') active FROM employees`),
+      query(`SELECT COUNT(*) c, COUNT(*) FILTER (WHERE status='active') active FROM employees WHERE LOWER(role)='driver'`),
       query(`SELECT COUNT(*) FILTER (WHERE status='present') present, COUNT(*) FILTER (WHERE status='absent') absent FROM attendance WHERE date=CURRENT_DATE`),
       query(`SELECT COUNT(*) c FROM leaves WHERE status='pending'`),
       query(`SELECT COUNT(*) c, COALESCE(SUM(amount),0) total FROM compliance_fines WHERE status='pending'`),
