@@ -91,6 +91,42 @@ router.get('/assignments', auth, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
+// GET /api/vehicles/assignments/history?vehicle_id=&emp_id=&limit=
+// Returns past assignments for a vehicle or a driver, newest first
+router.get('/assignments/history', auth, async (req, res) => {
+  try {
+    const { vehicle_id, emp_id } = req.query
+    const limit = Math.min(parseInt(req.query.limit)||60, 200)
+
+    // Drivers can only see their own history
+    const resolvedEmpId = req.user.role === 'driver' ? req.user.emp_id : (emp_id || null)
+
+    let sql = `
+      SELECT va.id, va.vehicle_id, va.emp_id, va.date, va.station_code, va.notes,
+             v.plate, v.make, v.model, v.year,
+             e.name  AS driver_name,
+             u.email AS assigned_by_email
+      FROM vehicle_assignments va
+      JOIN vehicles v ON va.vehicle_id = v.id
+      LEFT JOIN employees e  ON va.emp_id      = e.id
+      LEFT JOIN users     u  ON va.assigned_by = u.id
+      WHERE 1=1
+    `
+    const vals = []
+    if (vehicle_id)    { vals.push(vehicle_id);    sql += ` AND va.vehicle_id=$${vals.length}` }
+    if (resolvedEmpId) { vals.push(resolvedEmpId); sql += ` AND va.emp_id=$${vals.length}` }
+    // For POC role, scope to their station
+    if (req.user.role === 'poc') {
+      vals.push(req.user.station_code); sql += ` AND va.station_code=$${vals.length}`
+    }
+    vals.push(limit)
+    sql += ` ORDER BY va.date DESC LIMIT $${vals.length}`
+
+    const result = await query(sql, vals)
+    res.json({ history: result.rows })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
 // POST /api/vehicles/assignments
 router.post('/assignments', auth, requireRole('admin','manager','poc'), async (req, res) => {
   try {
