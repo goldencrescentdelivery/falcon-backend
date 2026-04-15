@@ -49,16 +49,26 @@ router.post('/', auth, requireRole('admin','manager','general_manager','hr','acc
   try {
     const { id,name,role,dept,status='active',salary=0,joined,phone,nationality,zone,
       visa_expiry,license_expiry,avatar='👤',station,station_code='DDB7',
-      hourly_rate=3.85,iloe_expiry,annual_leave_start,amazon_id,emirates_id,annual_leave_balance=30 } = req.body
+      hourly_rate=3.85,iloe_expiry,annual_leave_start,amazon_id,emirates_id,annual_leave_balance=30,
+      sub_group_name,beneficiary_first_name,beneficiary_middle_name,beneficiary_last_name,
+      father_family_name,dob,gender,marital_status,uid_number,emirates_issuing_visa,
+      residential_location,work_location,passport_no,email_id,visa_file_no } = req.body
     if (!id||!name||!role||!dept) return res.status(400).json({ error: 'id, name, role, dept required' })
     const result = await query(`
       INSERT INTO employees (id,name,role,dept,status,salary,joined,phone,nationality,zone,
         visa_expiry,license_expiry,avatar,station,station_code,hourly_rate,
-        iloe_expiry,annual_leave_start,amazon_id,emirates_id,annual_leave_balance)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING *`,
+        iloe_expiry,annual_leave_start,amazon_id,emirates_id,annual_leave_balance,
+        sub_group_name,beneficiary_first_name,beneficiary_middle_name,beneficiary_last_name,
+        father_family_name,dob,gender,marital_status,uid_number,emirates_issuing_visa,
+        residential_location,work_location,passport_no,email_id,visa_file_no)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
+              $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36) RETURNING *`,
       [id,name,role,dept,status,salary,joined||null,phone||null,nationality||null,zone||null,
        visa_expiry||null,license_expiry||null,avatar,station||null,station_code,hourly_rate,
-       iloe_expiry||null,annual_leave_start||null,amazon_id||null,emirates_id||null,annual_leave_balance])
+       iloe_expiry||null,annual_leave_start||null,amazon_id||null,emirates_id||null,annual_leave_balance,
+       sub_group_name||null,beneficiary_first_name||null,beneficiary_middle_name||null,beneficiary_last_name||null,
+       father_family_name||null,dob||null,gender||null,marital_status||null,uid_number||null,emirates_issuing_visa||null,
+       residential_location||null,work_location||null,passport_no||null,email_id||null,visa_file_no||null])
     req.io?.emit('employee:created', result.rows[0])
     res.status(201).json({ employee: result.rows[0] })
   } catch (err) {
@@ -71,17 +81,30 @@ router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','
   try {
     const { name,role,dept,status,salary,joined,phone,nationality,zone,visa_expiry,
       license_expiry,avatar,station,station_code,hourly_rate,iloe_expiry,
-      annual_leave_start,amazon_id,emirates_id,annual_leave_balance } = req.body
+      annual_leave_start,amazon_id,emirates_id,annual_leave_balance,
+      sub_group_name,beneficiary_first_name,beneficiary_middle_name,beneficiary_last_name,
+      father_family_name,dob,gender,marital_status,uid_number,emirates_issuing_visa,
+      residential_location,work_location,passport_no,email_id,visa_file_no } = req.body
     const result = await query(`
       UPDATE employees SET name=$1,role=$2,dept=$3,status=$4,salary=$5,joined=$6,phone=$7,
         nationality=$8,zone=$9,visa_expiry=$10,license_expiry=$11,avatar=$12,station=$13,
         station_code=$14,hourly_rate=$15,iloe_expiry=$16,annual_leave_start=$17,
-        amazon_id=$18,emirates_id=$19,annual_leave_balance=$20,updated_at=NOW()
-      WHERE id=$21 RETURNING *`,
+        amazon_id=$18,emirates_id=$19,annual_leave_balance=$20,
+        sub_group_name=$21,beneficiary_first_name=$22,beneficiary_middle_name=$23,
+        beneficiary_last_name=$24,father_family_name=$25,dob=$26,gender=$27,
+        marital_status=$28,uid_number=$29,emirates_issuing_visa=$30,
+        residential_location=$31,work_location=$32,passport_no=$33,
+        email_id=$34,visa_file_no=$35,updated_at=NOW()
+      WHERE id=$36 RETURNING *`,
       [name,role,dept,status,salary,joined||null,phone||null,nationality||null,zone||null,
        visa_expiry||null,license_expiry||null,avatar||'👤',station||null,station_code||'DDB7',
        hourly_rate||3.85,iloe_expiry||null,annual_leave_start||null,amazon_id||null,
-       emirates_id||null,annual_leave_balance||30,req.params.id])
+       emirates_id||null,annual_leave_balance||30,
+       sub_group_name||null,beneficiary_first_name||null,beneficiary_middle_name||null,
+       beneficiary_last_name||null,father_family_name||null,dob||null,gender||null,
+       marital_status||null,uid_number||null,emirates_issuing_visa||null,
+       residential_location||null,work_location||null,passport_no||null,
+       email_id||null,visa_file_no||null,req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
     req.io?.emit('employee:updated', result.rows[0])
     res.json({ employee: result.rows[0] })
