@@ -230,8 +230,11 @@ router.post('/:id/create-user', auth, requireRole('admin','manager','general_man
 
 router.delete('/:id', auth, requireRole('admin'), async (req, res) => {
   try {
-    // Delete linked user account first (avoids FK constraint from users.emp_id → employees.id)
+    // 1. Null out employees.user_id to drop the FK reference before deleting the user
+    await query('UPDATE employees SET user_id=NULL WHERE id=$1', [req.params.id])
+    // 2. Delete linked user account
     await query('DELETE FROM users WHERE emp_id=$1', [req.params.id])
+    // 3. Delete employee (all other FK tables use ON DELETE CASCADE / SET NULL)
     const result = await query('DELETE FROM employees WHERE id=$1 RETURNING id', [req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
     req.io?.emit('employee:deleted', { id: req.params.id })

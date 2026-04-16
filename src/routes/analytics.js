@@ -75,7 +75,7 @@ router.get('/alerts', auth, async (req, res) => {
           )
         )::int AS expiring_docs,
         (SELECT COUNT(*) FROM leaves    WHERE poc_status = 'pending')::int  AS pending_leaves,
-        (SELECT COUNT(*) FROM sims      WHERE status IN ('damaged','inactive'))::int AS sim_issues,
+        (SELECT COUNT(*) FROM sim_cards WHERE status IN ('damaged','inactive'))::int AS sim_issues,
         (SELECT COUNT(*) FROM vehicles  WHERE status IN ('grounded','maintenance'))::int AS fleet_issues
     `)
     const { expiring_docs, pending_leaves, sim_issues, fleet_issues } = result.rows[0]
