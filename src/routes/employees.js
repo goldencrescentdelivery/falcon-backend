@@ -110,6 +110,14 @@ router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','
        residential_location||null,work_location||null,passport_no||null,
        email_id||null,visa_file_no||null,req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
+
+    // Sync linked user account status with employee status
+    const userStatus = status === 'inactive' ? 'inactive' : 'active'
+    await query(
+      `UPDATE users SET status=$1 WHERE emp_id=$2`,
+      [userStatus, req.params.id]
+    ).catch(() => {})
+
     req.io?.emit('employee:updated', result.rows[0])
     res.json({ employee: result.rows[0] })
   } catch (err) {
