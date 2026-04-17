@@ -85,6 +85,10 @@ router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','
       sub_group_name,beneficiary_first_name,beneficiary_middle_name,beneficiary_last_name,
       father_family_name,dob,gender,marital_status,uid_number,emirates_issuing_visa,
       residential_location,work_location,passport_no,email_id,visa_file_no } = req.body
+
+    // Sanitise date fields — only accept YYYY-MM-DD, reject phone-like junk
+    const sd = v => (v && /^\d{4}-\d{2}-\d{2}$/.test(String(v))) ? v : null
+
     const result = await query(`
       UPDATE employees SET name=$1,role=$2,dept=$3,status=$4,salary=$5,joined=$6,phone=$7,
         nationality=$8,zone=$9,visa_expiry=$10,license_expiry=$11,avatar=$12,station=$13,
@@ -96,19 +100,22 @@ router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','
         residential_location=$31,work_location=$32,passport_no=$33,
         email_id=$34,visa_file_no=$35,updated_at=NOW()
       WHERE id=$36 RETURNING *`,
-      [name,role,dept,status,salary,joined||null,phone||null,nationality||null,zone||null,
-       visa_expiry||null,license_expiry||null,avatar||'👤',station||null,station_code||'DDB7',
-       hourly_rate||3.85,iloe_expiry||null,annual_leave_start||null,amazon_id||null,
-       emirates_id||null,annual_leave_balance||30,
+      [name,role,dept,status,Number(salary)||0,sd(joined),phone||null,nationality||null,zone||null,
+       sd(visa_expiry),sd(license_expiry),avatar||'👤',station||null,station_code||'DDB1',
+       Number(hourly_rate)||3.85,sd(iloe_expiry),sd(annual_leave_start),amazon_id||null,
+       emirates_id||null,Number(annual_leave_balance)||30,
        sub_group_name||null,beneficiary_first_name||null,beneficiary_middle_name||null,
-       beneficiary_last_name||null,father_family_name||null,dob||null,gender||null,
+       beneficiary_last_name||null,father_family_name||null,sd(dob),gender||null,
        marital_status||null,uid_number||null,emirates_issuing_visa||null,
        residential_location||null,work_location||null,passport_no||null,
        email_id||null,visa_file_no||null,req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
     req.io?.emit('employee:updated', result.rows[0])
     res.json({ employee: result.rows[0] })
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+  } catch (err) {
+    console.error('PUT /employees/:id error:', err.message, err.detail||'')
+    res.status(500).json({ error: err.detail || err.message || 'Server error' })
+  }
 })
 
 // POST /api/employees/:id/assign-work-number
