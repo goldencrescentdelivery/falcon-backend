@@ -71,6 +71,7 @@ app.use('/api/shifts',      require('./routes/shifts'))
 app.use('/api/damage',      require('./routes/damage'))
 app.use('/api/advances',    require('./routes/advances'))
 app.use('/api/petty-cash',  require('./routes/petty-cash'))
+app.use('/api/office',      require('./routes/office'))
 
 // ── Health check ───────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status:'ok', ts:new Date().toISOString() }))
@@ -104,6 +105,34 @@ async function autoMigrate() {
   ]
   for (const sql of cols) {
     try { await query(sql) } catch(e) { console.warn('migrate:', e.message) }
+  }
+  // office_documents & office_events (migrate15)
+  const officeTables = [
+    `CREATE TABLE IF NOT EXISTS office_documents (
+      id             SERIAL PRIMARY KEY,
+      name           TEXT NOT NULL,
+      document_number TEXT,
+      issued_by      TEXT,
+      issue_date     DATE,
+      expiry_date    DATE,
+      category       TEXT DEFAULT 'other',
+      notes          TEXT,
+      created_at     TIMESTAMPTZ DEFAULT NOW(),
+      updated_at     TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS office_events (
+      id          SERIAL PRIMARY KEY,
+      title       TEXT NOT NULL,
+      description TEXT,
+      event_date  DATE NOT NULL,
+      event_type  TEXT DEFAULT 'other',
+      created_by  INT REFERENCES users(id) ON DELETE SET NULL,
+      created_at  TIMESTAMPTZ DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ DEFAULT NOW()
+    )`,
+  ]
+  for (const sql of officeTables) {
+    try { await query(sql) } catch(e) { console.warn('migrate office:', e.message) }
   }
   console.log('Auto-migration complete')
 }
