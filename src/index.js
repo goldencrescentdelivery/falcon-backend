@@ -82,10 +82,43 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: err.message || 'Internal server error' })
 })
 
+// ── Auto-migrate on startup ────────────────────────────────────
+async function autoMigrate() {
+  const { query } = require('./db/pool')
+  const cols = [
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS sub_group_name        TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS beneficiary_first_name  TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS beneficiary_middle_name TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS beneficiary_last_name   TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS father_family_name      TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS dob                     DATE`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS gender                  TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS marital_status          TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS uid_number              TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS emirates_issuing_visa   TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS residential_location    TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS work_location           TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS passport_no             TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS email_id                TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS visa_file_no            TEXT`,
+  ]
+  for (const sql of cols) {
+    try { await query(sql) } catch(e) { console.warn('migrate:', e.message) }
+  }
+  console.log('Auto-migration complete')
+}
+
 // ── Start ──────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`GCD API running on port ${PORT}`)
+autoMigrate().then(() => {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`GCD API running on port ${PORT}`)
+  })
+}).catch(e => {
+  console.error('Migration failed, starting anyway:', e.message)
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`GCD API running on port ${PORT}`)
+  })
 })
 
 // ── Daily photo cleanup ────────────────────────────────────────
