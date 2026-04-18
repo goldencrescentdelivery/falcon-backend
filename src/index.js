@@ -117,9 +117,11 @@ async function autoMigrate() {
       expiry_date    DATE,
       category       TEXT DEFAULT 'other',
       notes          TEXT,
+      file_url       TEXT,
       created_at     TIMESTAMPTZ DEFAULT NOW(),
       updated_at     TIMESTAMPTZ DEFAULT NOW()
     )`,
+    `ALTER TABLE office_documents ADD COLUMN IF NOT EXISTS file_url TEXT`,
     `CREATE TABLE IF NOT EXISTS office_events (
       id          SERIAL PRIMARY KEY,
       title       TEXT NOT NULL,

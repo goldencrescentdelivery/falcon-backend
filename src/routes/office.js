@@ -17,10 +17,11 @@ router.post('/documents', auth, requireRole('admin','general_manager','hr'), asy
     const { name, document_number, issued_by, issue_date, expiry_date, category, notes } = req.body
     if (!name) return res.status(400).json({ error: 'Document name required' })
     const sd = v => (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) ? v : null
+    const { file_url } = req.body
     const r = await query(
-      `INSERT INTO office_documents (name, document_number, issued_by, issue_date, expiry_date, category, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [name, document_number||null, issued_by||null, sd(issue_date), sd(expiry_date), category||'other', notes||null]
+      `INSERT INTO office_documents (name, document_number, issued_by, issue_date, expiry_date, category, notes, file_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [name, document_number||null, issued_by||null, sd(issue_date), sd(expiry_date), category||'other', notes||null, file_url||null]
     )
     res.status(201).json({ document: r.rows[0] })
   } catch (err) { console.error(err); res.status(500).json({ error: err.message }) }
@@ -32,8 +33,8 @@ router.put('/documents/:id', auth, requireRole('admin','general_manager','hr'), 
     const sd = v => (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) ? v : null
     const r = await query(
       `UPDATE office_documents SET name=$1, document_number=$2, issued_by=$3, issue_date=$4,
-       expiry_date=$5, category=$6, notes=$7, updated_at=NOW() WHERE id=$8 RETURNING *`,
-      [name, document_number||null, issued_by||null, sd(issue_date), sd(expiry_date), category||'other', notes||null, req.params.id]
+       expiry_date=$5, category=$6, notes=$7, file_url=$8, updated_at=NOW() WHERE id=$9 RETURNING *`,
+      [name, document_number||null, issued_by||null, sd(issue_date), sd(expiry_date), category||'other', notes||null, req.body.file_url||null, req.params.id]
     )
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' })
     res.json({ document: r.rows[0] })
