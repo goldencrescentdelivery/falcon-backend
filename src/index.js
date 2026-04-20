@@ -102,6 +102,9 @@ async function autoMigrate() {
     `ALTER TABLE employees ADD COLUMN IF NOT EXISTS passport_no             TEXT`,
     `ALTER TABLE employees ADD COLUMN IF NOT EXISTS email_id                TEXT`,
     `ALTER TABLE employees ADD COLUMN IF NOT EXISTS visa_file_no            TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS project_type            TEXT    DEFAULT 'pulser'`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS per_shipment_rate       NUMERIC DEFAULT 0.5`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS performance_bonus       NUMERIC DEFAULT 0`,
   ]
   for (const sql of cols) {
     try { await query(sql) } catch(e) { console.warn('migrate:', e.message) }
