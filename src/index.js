@@ -122,6 +122,7 @@ async function autoMigrate() {
       updated_at     TIMESTAMPTZ DEFAULT NOW()
     )`,
     `ALTER TABLE office_documents ADD COLUMN IF NOT EXISTS file_url TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS insurance_url TEXT`,
     `CREATE TABLE IF NOT EXISTS office_events (
       id          SERIAL PRIMARY KEY,
       title       TEXT NOT NULL,

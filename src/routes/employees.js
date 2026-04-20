@@ -52,7 +52,7 @@ router.post('/', auth, requireRole('admin','manager','general_manager','hr','acc
       hourly_rate=3.85,iloe_expiry,annual_leave_start,amazon_id,emirates_id,annual_leave_balance=30,
       sub_group_name,beneficiary_first_name,beneficiary_middle_name,beneficiary_last_name,
       father_family_name,dob,gender,marital_status,uid_number,emirates_issuing_visa,
-      residential_location,work_location,passport_no,email_id,visa_file_no } = req.body
+      residential_location,work_location,passport_no,email_id,visa_file_no,insurance_url } = req.body
     if (!id||!name||!role||!dept) return res.status(400).json({ error: 'id, name, role, dept required' })
     const result = await query(`
       INSERT INTO employees (id,name,role,dept,status,salary,joined,phone,nationality,zone,
@@ -60,15 +60,15 @@ router.post('/', auth, requireRole('admin','manager','general_manager','hr','acc
         iloe_expiry,annual_leave_start,amazon_id,emirates_id,annual_leave_balance,
         sub_group_name,beneficiary_first_name,beneficiary_middle_name,beneficiary_last_name,
         father_family_name,dob,gender,marital_status,uid_number,emirates_issuing_visa,
-        residential_location,work_location,passport_no,email_id,visa_file_no)
+        residential_location,work_location,passport_no,email_id,visa_file_no,insurance_url)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-              $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36) RETURNING *`,
+              $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37) RETURNING *`,
       [id,name,role,dept,status,salary,joined||null,phone||null,nationality||null,zone||null,
        visa_expiry||null,license_expiry||null,avatar,station||null,station_code,hourly_rate,
        iloe_expiry||null,annual_leave_start||null,amazon_id||null,emirates_id||null,annual_leave_balance,
        sub_group_name||null,beneficiary_first_name||null,beneficiary_middle_name||null,beneficiary_last_name||null,
        father_family_name||null,dob||null,gender||null,marital_status||null,uid_number||null,emirates_issuing_visa||null,
-       residential_location||null,work_location||null,passport_no||null,email_id||null,visa_file_no||null])
+       residential_location||null,work_location||null,passport_no||null,email_id||null,visa_file_no||null,insurance_url||null])
     req.io?.emit('employee:created', result.rows[0])
     res.status(201).json({ employee: result.rows[0] })
   } catch (err) {
@@ -84,7 +84,7 @@ router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','
       annual_leave_start,amazon_id,emirates_id,annual_leave_balance,
       sub_group_name,beneficiary_first_name,beneficiary_middle_name,beneficiary_last_name,
       father_family_name,dob,gender,marital_status,uid_number,emirates_issuing_visa,
-      residential_location,work_location,passport_no,email_id,visa_file_no } = req.body
+      residential_location,work_location,passport_no,email_id,visa_file_no,insurance_url } = req.body
 
     // Sanitise date fields — only accept YYYY-MM-DD, reject phone-like junk
     const sd = v => (v && /^\d{4}-\d{2}-\d{2}$/.test(String(v))) ? v : null
@@ -98,8 +98,8 @@ router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','
         beneficiary_last_name=$24,father_family_name=$25,dob=$26,gender=$27,
         marital_status=$28,uid_number=$29,emirates_issuing_visa=$30,
         residential_location=$31,work_location=$32,passport_no=$33,
-        email_id=$34,visa_file_no=$35,updated_at=NOW()
-      WHERE id=$36 RETURNING *`,
+        email_id=$34,visa_file_no=$35,insurance_url=$36,updated_at=NOW()
+      WHERE id=$37 RETURNING *`,
       [name,role,dept,status,Number(salary)||0,sd(joined),phone||null,nationality||null,zone||null,
        sd(visa_expiry),sd(license_expiry),avatar||'👤',station||null,station_code||'DDB1',
        Number(hourly_rate)||3.85,sd(iloe_expiry),sd(annual_leave_start),amazon_id||null,
@@ -108,7 +108,7 @@ router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','
        beneficiary_last_name||null,father_family_name||null,sd(dob),gender||null,
        marital_status||null,uid_number||null,emirates_issuing_visa||null,
        residential_location||null,work_location||null,passport_no||null,
-       email_id||null,visa_file_no||null,req.params.id])
+       email_id||null,visa_file_no||null,insurance_url||null,req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
 
     // Sync linked user account status with employee status
