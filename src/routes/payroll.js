@@ -12,6 +12,7 @@ router.get('/', auth, async (req, res) => {
     let sql = `
       SELECT
         e.id, e.name, e.role, e.dept, e.avatar, e.salary AS base_salary,
+        e.hourly_rate, e.station_code, e.project_type, e.per_shipment_rate, e.performance_bonus,
         COALESCE(SUM(DISTINCT sb.amount) FILTER (WHERE sb.month=$1), 0) AS bonus_total,
         COALESCE(SUM(DISTINCT sd.amount) FILTER (WHERE sd.month=$1), 0) AS deduction_total,
         p.status AS payroll_status, p.paid_on, p.net_pay, p.id AS payroll_id
@@ -23,7 +24,7 @@ router.get('/', auth, async (req, res) => {
     `
     const vals = [month]
     if (empId) { vals.push(empId); sql += ` AND e.id=$${vals.length}` }
-    sql += ' GROUP BY e.id, e.name, e.role, e.dept, e.avatar, e.salary, p.status, p.paid_on, p.net_pay, p.id ORDER BY e.name'
+    sql += ' GROUP BY e.id, e.name, e.role, e.dept, e.avatar, e.salary, e.hourly_rate, e.station_code, e.project_type, e.per_shipment_rate, e.performance_bonus, p.status, p.paid_on, p.net_pay, p.id ORDER BY e.name'
 
     const result = await query(sql, vals)
 
