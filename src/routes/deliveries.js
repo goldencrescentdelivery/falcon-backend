@@ -75,4 +75,44 @@ router.post('/', auth, requireRole('admin','manager','poc'), async (req, res) =>
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
+// PUT /api/deliveries/:id — edit a delivery record
+router.put('/:id', auth, requireRole('admin','manager','poc'), async (req, res) => {
+  try {
+    const { total, attempted, successful, returned, notes } = req.body
+    let sql = `UPDATE daily_deliveries SET total=$1,attempted=$2,successful=$3,returned=$4,notes=$5,updated_at=NOW()`
+    const vals = [total, attempted||0, successful||0, returned||0, notes||null]
+    // POC can only edit their own station's records
+    if (req.user.role === 'poc') {
+      vals.push(req.params.id, req.user.station_code || 'DDB1')
+      sql += ` WHERE id=$6 AND station_code=$7 RETURNING *`
+    } else {
+      vals.push(req.params.id)
+      sql += ` WHERE id=$6 RETURNING *`
+    }
+    const result = await query(sql, vals)
+    if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
+    req.io?.emit('deliveries:updated', result.rows[0])
+    res.json({ delivery: result.rows[0] })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
+// DELETE /api/deliveries/:id
+router.delete('/:id', auth, requireRole('admin','manager','poc'), async (req, res) => {
+  try {
+    let sql, vals
+    if (req.user.role === 'poc') {
+      // POC can only delete their own station's records
+      sql  = `DELETE FROM daily_deliveries WHERE id=$1 AND station_code=$2 RETURNING id`
+      vals = [req.params.id, req.user.station_code || 'DDB1']
+    } else {
+      sql  = `DELETE FROM daily_deliveries WHERE id=$1 RETURNING id`
+      vals = [req.params.id]
+    }
+    const result = await query(sql, vals)
+    if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
+    req.io?.emit('deliveries:deleted', { id: parseInt(req.params.id) })
+    res.json({ ok: true })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
 module.exports = router

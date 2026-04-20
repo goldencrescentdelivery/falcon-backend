@@ -16,6 +16,7 @@ router.get('/', auth, async (req, res) => {
       sql += ` AND (LOWER(name) LIKE $${vals.length} OR LOWER(id) LIKE $${vals.length} OR LOWER(COALESCE(amazon_id,'')) LIKE $${vals.length})`
     }
     if (req.user.role === 'driver') { vals.push(req.user.emp_id); sql += ` AND id=$${vals.length}` }
+    if (req.user.role === 'poc' && req.user.station_code) { vals.push(req.user.station_code); sql += ` AND station_code=$${vals.length}` }
     sql += ' ORDER BY name'
     const result = await query(sql, vals)
     res.json({ employees: result.rows })
