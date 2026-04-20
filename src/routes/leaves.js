@@ -5,7 +5,7 @@ const V = require('../middleware/validate')
 
 router.get('/', auth, async (req, res) => {
   try {
-    const { status, emp_id } = req.query
+    const { status, emp_id, stage } = req.query
     let sql  = `SELECT l.*, e.name, e.avatar, e.station_code FROM leaves l JOIN employees e ON l.emp_id=e.id WHERE 1=1`
     const vals = []
     if (req.user.role === 'driver') {
@@ -13,10 +13,24 @@ router.get('/', auth, async (req, res) => {
     } else if (req.user.role === 'poc') {
       // POC sees their station's leaves; stage=all includes history
       vals.push(req.user.station_code); sql += ` AND e.station_code=$${vals.length}`
-      if (req.query.stage !== 'all') sql += ` AND l.poc_status='pending'`
-    } else {
+      if (stage !== 'all') sql += ` AND l.poc_status='pending'`
+    } else if (req.user.role === 'hr') {
+      // HR sees leaves that POC has approved and are waiting for HR sign-off
       if (emp_id) { vals.push(emp_id); sql += ` AND l.emp_id=$${vals.length}` }
-      if (status) { vals.push(status); sql += ` AND l.status=$${vals.length}` }
+      if (stage === 'pending') {
+        sql += ` AND l.poc_status='approved' AND l.hr_status='pending'`
+      } else if (status) {
+        vals.push(status); sql += ` AND l.status=$${vals.length}`
+      }
+    } else {
+      // admin / manager / general_manager
+      if (emp_id) { vals.push(emp_id); sql += ` AND l.emp_id=$${vals.length}` }
+      if (stage === 'pending') {
+        // Only show leaves that have cleared POC + HR and need final admin sign-off
+        sql += ` AND l.hr_status='approved' AND l.mgr_status='pending'`
+      } else if (status) {
+        vals.push(status); sql += ` AND l.status=$${vals.length}`
+      }
     }
     sql += ' ORDER BY l.created_at DESC'
     const result = await query(sql, vals)
