@@ -62,8 +62,9 @@ app.use('/api/poc',         require('./routes/poc'))
 app.use('/api/analytics',   require('./routes/analytics'))
 app.use('/api/deliveries',  require('./routes/deliveries'))
 app.use('/api/backup',      require('./routes/backup'))
-app.use('/api/vehicles',    require('./routes/vehicles'))
-app.use('/api/documents',   require('./routes/documents'))
+app.use('/api/vehicles',             require('./routes/vehicles'))
+app.use('/api/vehicle-inspections',  require('./routes/vehicle-inspections'))
+app.use('/api/documents',            require('./routes/documents'))
 app.use('/api/sims',        require('./routes/sims'))
 app.use('/api/handovers',   require('./routes/handovers'))
 app.use('/api/performance', require('./routes/performance'))
@@ -140,6 +141,28 @@ async function autoMigrate() {
   for (const sql of officeTables) {
     try { await query(sql) } catch(e) { console.warn('migrate office:', e.message) }
   }
+  // vehicle_inspections (migrate15)
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS vehicle_inspections (
+        id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        vehicle_id       UUID REFERENCES vehicles(id) ON DELETE CASCADE,
+        inspection_date  DATE NOT NULL,
+        inspector_name   TEXT,
+        approved_by_name TEXT,
+        approved_by_date DATE,
+        sections         JSONB DEFAULT '{}',
+        additional_notes TEXT,
+        status           TEXT DEFAULT 'completed',
+        created_by       UUID REFERENCES users(id),
+        created_at       TIMESTAMPTZ DEFAULT NOW(),
+        updated_at       TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    await query(`CREATE INDEX IF NOT EXISTS idx_vi_vehicle_id ON vehicle_inspections(vehicle_id)`)
+    await query(`CREATE INDEX IF NOT EXISTS idx_vi_date ON vehicle_inspections(inspection_date DESC)`)
+  } catch(e) { console.warn('migrate vehicle_inspections:', e.message) }
+
   console.log('Auto-migration complete')
 }
 
