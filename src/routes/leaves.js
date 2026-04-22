@@ -11,23 +11,22 @@ router.get('/', auth, async (req, res) => {
     if (req.user.role === 'driver') {
       vals.push(req.user.emp_id); sql += ` AND l.emp_id=$${vals.length}`
     } else if (req.user.role === 'poc') {
-      // POC sees their station's leaves; stage=all includes history
+      // POC sees all leaves for their station (read-only visibility)
       vals.push(req.user.station_code); sql += ` AND e.station_code=$${vals.length}`
-      if (stage !== 'all') sql += ` AND l.poc_status='pending'`
-    } else if (req.user.role === 'hr') {
-      // HR sees leaves that POC has approved and are waiting for HR sign-off
+      if (status) { vals.push(status); sql += ` AND l.status=$${vals.length}` }
+    } else if (req.user.role === 'manager') {
+      // Manager sees leaves pending their approval
       if (emp_id) { vals.push(emp_id); sql += ` AND l.emp_id=$${vals.length}` }
       if (stage === 'pending') {
-        sql += ` AND l.poc_status='approved' AND l.hr_status='pending'`
+        sql += ` AND l.mgr_status='pending'`
       } else if (status) {
         vals.push(status); sql += ` AND l.status=$${vals.length}`
       }
     } else {
-      // admin / manager / general_manager
+      // admin / general_manager / hr — see all leaves
       if (emp_id) { vals.push(emp_id); sql += ` AND l.emp_id=$${vals.length}` }
       if (stage === 'pending') {
-        // Only show leaves that have cleared POC + HR and need final admin sign-off
-        sql += ` AND l.hr_status='approved' AND l.mgr_status='pending'`
+        sql += ` AND l.mgr_status='pending'`
       } else if (status) {
         vals.push(status); sql += ` AND l.status=$${vals.length}`
       }
@@ -43,11 +42,10 @@ router.post('/', auth, V.validateLeave, async (req, res) => {
     const { emp_id, type, from_date, to_date, days, reason } = req.body
     const actualEmpId = req.user.role === 'driver' ? req.user.emp_id : emp_id
 
-    // Non-DA roles skip POC + HR steps and go straight to Admin
-    const skipToAdmin = ['poc', 'accountant', 'hr', 'general_manager'].includes(req.user.role)
-    const pocSt  = skipToAdmin ? 'approved' : 'pending'
-    const hrSt   = skipToAdmin ? 'approved' : 'pending'
-    const mgrSt  = skipToAdmin ? 'pending'  : 'waiting'
+    // All leave requests go directly to manager — skip POC and HR steps
+    const pocSt  = 'approved'
+    const hrSt   = 'approved'
+    const mgrSt  = 'pending'
 
     const result = await query(`
       INSERT INTO leaves (emp_id, type, from_date, to_date, days, reason, poc_status, hr_status, mgr_status)
@@ -113,8 +111,8 @@ router.patch('/:id/hr', auth, requireRole('admin','general_manager','hr'), async
   } catch (err) { console.error('LEAVE HR ERR:', err.message); res.status(500).json({ error: 'Server error' }) }
 })
 
-// PATCH /:id/manager — Admin final sign-off (step 3)
-router.patch('/:id/manager', auth, requireRole('admin'), async (req, res) => {
+// PATCH /:id/manager — Manager approves or rejects leave
+router.patch('/:id/manager', auth, requireRole('admin','manager'), async (req, res) => {
   try {
     const { status } = req.body
     if (!['approved','rejected'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
