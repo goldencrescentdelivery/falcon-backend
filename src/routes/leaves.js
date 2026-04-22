@@ -6,7 +6,7 @@ const V = require('../middleware/validate')
 router.get('/', auth, async (req, res) => {
   try {
     const { status, emp_id, stage } = req.query
-    let sql  = `SELECT l.*, e.name, e.avatar, e.station_code FROM leaves l JOIN employees e ON l.emp_id=e.id WHERE 1=1`
+    let sql  = `SELECT l.*, e.name, e.avatar, e.station_code, u.name AS mgr_name FROM leaves l JOIN employees e ON l.emp_id=e.id LEFT JOIN users u ON l.mgr_id=u.id WHERE 1=1`
     const vals = []
     if (req.user.role === 'driver') {
       vals.push(req.user.emp_id); sql += ` AND l.emp_id=$${vals.length}`
