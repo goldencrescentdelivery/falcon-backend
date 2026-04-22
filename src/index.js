@@ -72,7 +72,8 @@ app.use('/api/shifts',      require('./routes/shifts'))
 app.use('/api/damage',      require('./routes/damage'))
 app.use('/api/advances',    require('./routes/advances'))
 app.use('/api/petty-cash',  require('./routes/petty-cash'))
-app.use('/api/office',      require('./routes/office'))
+app.use('/api/office',         require('./routes/office'))
+app.use('/api/notifications',  require('./routes/notifications'))
 
 // ── Health check ───────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status:'ok', ts:new Date().toISOString() }))
@@ -162,6 +163,23 @@ async function autoMigrate() {
     await query(`CREATE INDEX IF NOT EXISTS idx_vi_vehicle_id ON vehicle_inspections(vehicle_id)`)
     await query(`CREATE INDEX IF NOT EXISTS idx_vi_date ON vehicle_inspections(inspection_date DESC)`)
   } catch(e) { console.warn('migrate vehicle_inspections:', e.message) }
+
+  // notifications table
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
+        title      TEXT NOT NULL,
+        body       TEXT,
+        type       TEXT DEFAULT 'announcement',
+        ref_id     UUID,
+        read       BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    await query(`CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read, created_at DESC)`)
+  } catch(e) { console.warn('migrate notifications:', e.message) }
 
   console.log('Auto-migration complete')
 }

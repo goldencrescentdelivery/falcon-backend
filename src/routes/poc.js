@@ -87,6 +87,22 @@ router.post('/announcements', auth, V.validateAnnouncement, requireRole('admin',
       [title, body, resolvedStation||null, req.user.id]
     )
     req.io?.emit('announcement:new', result.rows[0])
+
+    // Notify DAs in the relevant station (or all DAs if station-wide)
+    try {
+      let dSql = `SELECT u.id AS user_id, u.emp_id FROM users u JOIN employees e ON e.id=u.emp_id WHERE u.role='driver'`
+      const dVals = []
+      if (resolvedStation) { dVals.push(resolvedStation); dSql += ` AND e.station_code=$1` }
+      const drivers = await query(dSql, dVals)
+      for (const d of drivers.rows) {
+        await query(
+          `INSERT INTO notifications (user_id, title, body, type, ref_id) VALUES ($1,$2,$3,'announcement',$4)`,
+          [d.user_id, title, body, result.rows[0].id]
+        )
+        req.io?.to(`emp:${d.emp_id}`).emit('notification:new', { title, body, created_at: new Date(), ref_id: result.rows[0].id })
+      }
+    } catch(e) { console.error('DA notification error:', e.message) }
+
     res.status(201).json({ announcement: result.rows[0] })
   } catch (err) {
     res.status(500).json({ error: 'Server error' })
