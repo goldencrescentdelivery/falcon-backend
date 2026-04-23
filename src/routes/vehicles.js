@@ -45,7 +45,7 @@ router.put('/:id', auth, V.validateParams({ id: 'uuid' }), V.validateVehicle, re
 })
 
 // DELETE /api/vehicles/:id
-router.delete('/:id', auth, requireRole('admin','manager'), async (req, res) => {
+router.delete('/:id', auth, requireRole('admin','manager','poc'), async (req, res) => {
   try {
     await query('DELETE FROM vehicles WHERE id=$1', [req.params.id])
     res.json({ message: 'Vehicle deleted' })
