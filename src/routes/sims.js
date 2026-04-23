@@ -59,6 +59,9 @@ router.post('/', auth, requireRole('admin','manager','general_manager','poc'), a
     `, [sim_number, phone_number||null, carrier||'Du', status||'available',
         emp_id||null, station_code||req.user.station_code||null, notes||null,
         monthly_cost||0, emp_id?req.user.id:null, emp_id?new Date():null])
+    if (emp_id && phone_number) {
+      await query(`UPDATE employees SET work_number=$1 WHERE id=$2`, [phone_number, emp_id])
+    }
     res.status(201).json({ sim: result.rows[0] })
   } catch (err) {
     if (err.code==='23505') return res.status(409).json({ error: 'SIM number already exists' })
@@ -70,8 +73,14 @@ router.post('/', auth, requireRole('admin','manager','general_manager','poc'), a
 router.put('/:id', auth, requireRole('admin','manager','general_manager','poc'), async (req, res) => {
   try {
     const { sim_number, phone_number, carrier, status, emp_id, station_code, notes, monthly_cost } = req.body
-    const assigned_at  = emp_id ? new Date() : null
-    const assigned_by  = emp_id ? req.user.id : null
+
+    // Fetch current SIM to detect assignment changes
+    const prev = await query(`SELECT * FROM sim_cards WHERE id=$1`, [req.params.id])
+    if (!prev.rows[0]) return res.status(404).json({ error: 'Not found' })
+    const prevSim = prev.rows[0]
+
+    const assigned_at = emp_id ? new Date() : null
+    const assigned_by = emp_id ? req.user.id : null
     const result = await query(`
       UPDATE sim_cards SET
         sim_number=$1, phone_number=$2, carrier=$3, status=$4,
@@ -81,9 +90,27 @@ router.put('/:id', auth, requireRole('admin','manager','general_manager','poc'),
     `, [sim_number, phone_number||null, carrier||'Du', status||'available',
         emp_id||null, station_code||null, notes||null, monthly_cost||0,
         assigned_at, assigned_by, req.params.id])
-    if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
-    res.json({ sim: result.rows[0] })
-  } catch (err) { res.status(500).json({ error: 'Server error' }) }
+
+    const sim = result.rows[0]
+
+    // Sync employees.work_number whenever assignment changes
+    const ph = sim.phone_number
+    if (emp_id && ph) {
+      // Release old SIM from this employee if they had a different one
+      const empRow = await query(`SELECT work_number FROM employees WHERE id=$1`, [emp_id])
+      const oldWN  = empRow.rows[0]?.work_number
+      if (oldWN && oldWN !== ph) {
+        await query(`UPDATE sim_cards SET emp_id=NULL, status='available', assigned_at=NULL, assigned_by=NULL WHERE phone_number=$1`, [oldWN])
+      }
+      await query(`UPDATE employees SET work_number=$1 WHERE id=$2`, [ph, emp_id])
+    }
+    // If SIM was previously assigned to someone and is now unassigned or reassigned, clear old employee's work_number
+    if (prevSim.emp_id && prevSim.emp_id !== (emp_id || null)) {
+      await query(`UPDATE employees SET work_number=NULL WHERE id=$1 AND work_number=$2`, [prevSim.emp_id, prevSim.phone_number])
+    }
+
+    res.json({ sim })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
 // DELETE /api/sims/:id
@@ -133,13 +160,14 @@ router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc'
       const assignedAt = resolvedEmpId ? new Date() : null
       const assignedBy = resolvedEmpId ? req.user.id : null
 
+      const ph = (row.phone_number||'').trim() || null
       try {
         await query(`
           INSERT INTO sim_cards (sim_number, phone_number, carrier, status, emp_id, station_code, notes, monthly_cost, assigned_at, assigned_by)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
         `, [
           sim_number,
-          (row.phone_number||'').trim() || null,
+          ph,
           (row.carrier||'Du').trim(),
           status,
           resolvedEmpId,
@@ -149,6 +177,10 @@ router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc'
           assignedAt,
           assignedBy,
         ])
+        // Sync employees.work_number when bulk-assigning
+        if (resolvedEmpId && ph) {
+          await query(`UPDATE employees SET work_number=$1 WHERE id=$2`, [ph, resolvedEmpId])
+        }
         inserted++
       } catch (e) {
         if (e.code === '23505') skipped++
