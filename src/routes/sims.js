@@ -112,18 +112,42 @@ router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc'
       if (!sim_number) { errors.push({ row: i+1, error: 'sim_number required' }); continue }
 
       const sc = req.user.role === 'poc' ? req.user.station_code : (row.station_code || null)
+
+      // Resolve employee by ID or name if provided
+      let resolvedEmpId = null
+      const empIdentifier = (row.emp_id || '').trim()
+      if (empIdentifier) {
+        const empRes = await query(
+          `SELECT id FROM employees WHERE LOWER(id)=LOWER($1) OR LOWER(name)=LOWER($1) LIMIT 1`,
+          [empIdentifier]
+        )
+        if (empRes.rows[0]) {
+          resolvedEmpId = empRes.rows[0].id
+        } else {
+          errors.push({ row: i+1, sim_number, error: `Employee not found: ${empIdentifier}` })
+          continue
+        }
+      }
+
+      const status   = resolvedEmpId ? 'assigned' : (['available','assigned','inactive','damaged'].includes(row.status) ? row.status : 'available')
+      const assignedAt = resolvedEmpId ? new Date() : null
+      const assignedBy = resolvedEmpId ? req.user.id : null
+
       try {
         await query(`
-          INSERT INTO sim_cards (sim_number, phone_number, carrier, status, station_code, notes, monthly_cost)
-          VALUES ($1,$2,$3,$4,$5,$6,$7)
+          INSERT INTO sim_cards (sim_number, phone_number, carrier, status, emp_id, station_code, notes, monthly_cost, assigned_at, assigned_by)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
         `, [
           sim_number,
           (row.phone_number||'').trim() || null,
           (row.carrier||'Du').trim(),
-          ['available','assigned','inactive','damaged'].includes(row.status) ? row.status : 'available',
+          status,
+          resolvedEmpId,
           sc,
           (row.notes||'').trim() || null,
           parseFloat(row.monthly_cost) || 0,
+          assignedAt,
+          assignedBy,
         ])
         inserted++
       } catch (e) {
