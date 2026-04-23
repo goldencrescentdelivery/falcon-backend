@@ -6,12 +6,8 @@ const V = require('../middleware/validate')
 // GET /api/vehicles
 router.get('/', auth, async (req, res) => {
   try {
-    let sc = req.query.station_code
-    if (req.user.role === 'poc') sc = req.user.station_code
-    const sql = sc
-      ? `SELECT * FROM vehicles WHERE station_code=$1 ORDER BY plate`
-      : `SELECT * FROM vehicles ORDER BY station_code, plate`
-    const result = await query(sql, sc ? [sc] : [])
+    // All vehicles visible to all roles — no station filter
+    const result = await query(`SELECT * FROM vehicles ORDER BY station_code, plate`)
     res.json({ vehicles: result.rows })
   } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })
