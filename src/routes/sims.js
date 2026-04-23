@@ -94,4 +94,46 @@ router.delete('/:id', auth, requireRole('admin','manager'), async (req, res) => 
   } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })
 
+// POST /api/sims/bulk — bulk insert SIM cards from CSV upload
+router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc'), async (req, res) => {
+  try {
+    const { sims } = req.body
+    if (!Array.isArray(sims) || sims.length === 0)
+      return res.status(400).json({ error: 'sims array required' })
+    if (sims.length > 500)
+      return res.status(400).json({ error: 'Max 500 SIMs per upload' })
+
+    let inserted = 0, skipped = 0
+    const errors = []
+
+    for (let i = 0; i < sims.length; i++) {
+      const row = sims[i]
+      const sim_number = (row.sim_number || '').trim()
+      if (!sim_number) { errors.push({ row: i+1, error: 'sim_number required' }); continue }
+
+      const sc = req.user.role === 'poc' ? req.user.station_code : (row.station_code || null)
+      try {
+        await query(`
+          INSERT INTO sim_cards (sim_number, phone_number, carrier, status, station_code, notes, monthly_cost)
+          VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `, [
+          sim_number,
+          (row.phone_number||'').trim() || null,
+          (row.carrier||'Du').trim(),
+          ['available','assigned','inactive','damaged'].includes(row.status) ? row.status : 'available',
+          sc,
+          (row.notes||'').trim() || null,
+          parseFloat(row.monthly_cost) || 0,
+        ])
+        inserted++
+      } catch (e) {
+        if (e.code === '23505') skipped++
+        else errors.push({ row: i+1, sim_number, error: e.message })
+      }
+    }
+
+    res.json({ inserted, skipped, errors })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
 module.exports = router
