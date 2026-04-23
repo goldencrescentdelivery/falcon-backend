@@ -2,6 +2,7 @@ const router  = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
 const V = require('../middleware/validate')
+const { sendPushToUsers } = require('./notifications')
 
 // GET /api/poc/drivers — POC sees their station's drivers
 router.get('/drivers', auth, requireRole('poc','admin','manager'), async (req, res) => {
@@ -94,13 +95,17 @@ router.post('/announcements', auth, V.validateAnnouncement, requireRole('admin',
       const dVals = []
       if (resolvedStation) { dVals.push(resolvedStation); dSql += ` AND e.station_code=$1` }
       const drivers = await query(dSql, dVals)
+      const userIds = []
       for (const d of drivers.rows) {
         await query(
           `INSERT INTO notifications (user_id, title, body, type, ref_id) VALUES ($1,$2,$3,'announcement',$4)`,
           [d.user_id, title, body, result.rows[0].id]
         )
         req.io?.to(`emp:${d.emp_id}`).emit('notification:new', { title, body, created_at: new Date(), ref_id: result.rows[0].id })
+        userIds.push(d.user_id)
       }
+      // Web push (works even when app is closed)
+      sendPushToUsers(userIds, { title, body, url: '/driver' }).catch(e => console.error('Push error:', e.message))
     } catch(e) { console.error('DA notification error:', e.message) }
 
     res.status(201).json({ announcement: result.rows[0] })

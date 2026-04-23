@@ -181,12 +181,41 @@ async function autoMigrate() {
     await query(`CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read, created_at DESC)`)
   } catch(e) { console.warn('migrate notifications:', e.message) }
 
+  // settings table (for VAPID keys etc.)
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key        TEXT PRIMARY KEY,
+        value      TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+  } catch(e) { console.warn('migrate settings:', e.message) }
+
+  // push_subscriptions table
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
+        endpoint   TEXT NOT NULL,
+        p256dh     TEXT NOT NULL,
+        auth       TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(user_id, endpoint)
+      )
+    `)
+    await query(`CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id)`)
+  } catch(e) { console.warn('migrate push_subscriptions:', e.message) }
+
   console.log('Auto-migration complete')
 }
 
 // ── Start ──────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001
-autoMigrate().then(() => {
+autoMigrate().then(async () => {
+  // Init VAPID keys after tables exist
+  try { await require('./lib/webpush').initVapid() } catch(e) { console.warn('VAPID init:', e.message) }
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`GCD API running on port ${PORT}`)
   })
