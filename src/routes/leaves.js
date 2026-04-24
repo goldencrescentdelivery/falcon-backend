@@ -2,6 +2,7 @@ const router  = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
 const V = require('../middleware/validate')
+const { sendPushToUsers } = require('./notifications')
 
 router.get('/', auth, async (req, res) => {
   try {
@@ -119,6 +120,21 @@ router.patch('/:id/hr', auth, requireRole('admin','manager'), async (req, res) =
     `, [status, req.user.id, req.params.id])
 
     req.io?.emit('leave:updated', result.rows[0])
+
+    // Notify admins when manager approves — leave is now awaiting final admin decision
+    if (status === 'approved') {
+      const leave    = result.rows[0]
+      const empRow   = await query(`SELECT name FROM employees WHERE id=$1`, [leave.emp_id])
+      const empName  = empRow.rows[0]?.name || leave.emp_id
+      const admins   = await query(`SELECT id FROM users WHERE role IN ('admin','general_manager') AND status='active'`)
+      const adminIds = admins.rows.map(r => r.id)
+      sendPushToUsers(adminIds, {
+        title: '✅ Leave Awaiting Final Approval',
+        body:  `${empName}'s leave request has been approved by POC & Manager — your approval required`,
+        url:   '/dashboard/hr/leaves',
+      }).catch(() => {})
+    }
+
     res.json({ leave: result.rows[0] })
   } catch (err) { console.error('LEAVE MGR ERR:', err.message); res.status(500).json({ error: 'Server error' }) }
 })
