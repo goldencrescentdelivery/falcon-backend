@@ -170,6 +170,9 @@ router.patch('/:id/manager', auth, requireRole('admin','general_manager'), async
       ).catch(e => console.error('Leave balance update error:', e.message))
     }
 
+    req.audit('FINAL_DECISION', 'leave', req.params.id,
+      { mgr_status: 'pending' }, { mgr_status: status, decided_by: req.user.id })
+
     req.io?.emit('leave:updated', result.rows[0])
     res.json({ leave: result.rows[0] })
   } catch (err) { console.error('LEAVE ADMIN ERR:', err.message); res.status(500).json({ error: 'Server error' }) }

@@ -49,6 +49,7 @@ app.use('/api', rateLimit({
 }))
 
 app.use((req, _res, next) => { req.io = io; next() })
+app.use(require('./middleware/audit'))
 
 // ── Routes ─────────────────────────────────────────────────────
 app.use('/api/auth',        require('./routes/auth'))
@@ -212,6 +213,29 @@ async function autoMigrate() {
   try {
     await query(`ALTER TABLE petty_cash ADD COLUMN IF NOT EXISTS emp_id TEXT REFERENCES employees(id) ON DELETE SET NULL`)
   } catch(e) { console.warn('migrate petty_cash emp_id:', e.message) }
+
+  // Phase 2 — Audit log table
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id     UUID,
+        user_name   TEXT,
+        user_role   TEXT,
+        action      TEXT NOT NULL,
+        entity      TEXT NOT NULL,
+        entity_id   TEXT,
+        old_value   JSONB,
+        new_value   JSONB,
+        ip_address  TEXT,
+        user_agent  TEXT,
+        created_at  TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    await query(`CREATE INDEX IF NOT EXISTS idx_audit_entity   ON audit_logs(entity, entity_id)`)
+    await query(`CREATE INDEX IF NOT EXISTS idx_audit_user     ON audit_logs(user_id)`)
+    await query(`CREATE INDEX IF NOT EXISTS idx_audit_created  ON audit_logs(created_at DESC)`)
+  } catch(e) { console.warn('migrate audit_logs:', e.message) }
 
   // Phase 1 — Performance indexes
   const indexes = [

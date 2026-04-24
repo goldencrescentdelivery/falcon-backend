@@ -118,6 +118,9 @@ router.post('/mark-paid', auth, requireRole('admin','accountant'), async (req, r
       RETURNING *
     `, [emp_id, month, base, bonus, deduct, net, req.user.id])
 
+    req.audit('MARK_PAID', 'payroll', result.rows[0].id,
+      null, { emp_id, month, net_pay: net, paid_by: req.user.id })
+
     req.io?.emit('payroll:paid', result.rows[0])
     res.json({ payroll: result.rows[0] })
   } catch (err) {
