@@ -63,6 +63,71 @@ router.delete('/unsubscribe', auth, async (req, res) => {
   } catch(err) { res.status(500).json({ error: 'Server error' }) }
 })
 
+// GET /api/notifications/alerts — expired/expiring documents for all employees
+router.get('/alerts', auth, async (req, res) => {
+  try {
+    const cutoff = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
+    const result = await query(`
+      SELECT id, name, role, station_code,
+        visa_expiry, license_expiry, iloe_expiry
+      FROM employees
+      WHERE status = 'active'
+        AND (
+          (visa_expiry     IS NOT NULL AND visa_expiry     <= $1) OR
+          (license_expiry  IS NOT NULL AND license_expiry  <= $1) OR
+          (iloe_expiry     IS NOT NULL AND iloe_expiry     <= $1)
+        )
+      ORDER BY name
+    `, [cutoff])
+
+    const today  = new Date()
+    const alerts = []
+
+    for (const emp of result.rows) {
+      for (const [field, label] of [['visa_expiry','Visa'],['license_expiry','License'],['iloe_expiry','ILOE']]) {
+        const d = emp[field]
+        if (!d) continue
+        const days = Math.ceil((new Date(d) - today) / 86400000)
+        if (days <= 30) {
+          alerts.push({
+            emp_id: emp.id, name: emp.name, role: emp.role,
+            station_code: emp.station_code,
+            type: field, label, date: d, days,
+            severity: days < 0 ? 'expired' : days <= 7 ? 'critical' : 'warning'
+          })
+        }
+      }
+    }
+
+    alerts.sort((a, b) => a.days - b.days)
+    const staff   = alerts.filter(a => a.role !== 'driver')
+    const drivers = alerts.filter(a => a.role === 'driver')
+
+    res.json({ alerts, staff, drivers, total: alerts.length })
+  } catch(err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
+// POST /api/notifications/push-critical — push expired-doc alert to all admin subscribers
+router.post('/push-critical', auth, async (req, res) => {
+  try {
+    const { expiredCount, criticalCount } = req.body
+    const admins = await query(
+      `SELECT id FROM users WHERE role IN ('admin','general_manager') AND status='active'`
+    )
+    const adminIds = admins.rows.map(r => r.id)
+    const body = [
+      expiredCount  > 0 ? `${expiredCount} expired`   : '',
+      criticalCount > 0 ? `${criticalCount} expiring`  : '',
+    ].filter(Boolean).join(', ')
+    await sendPushToUsers(adminIds, {
+      title: '⚠️ Document Alert',
+      body:  `${body} — action required`,
+      url:   '/dashboard/hr/employees',
+    })
+    res.json({ ok: true })
+  } catch(err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
 // Internal helper used by other routes to fan-out push to a list of user_ids
 async function sendPushToUsers(userIds, payload) {
   if (!userIds?.length) return
