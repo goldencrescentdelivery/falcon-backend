@@ -31,7 +31,7 @@ router.get('/', auth, async (req, res) => {
     } else if (req.user.role === 'manager') {
       if (emp_id) { vals.push(emp_id); sql += ` AND l.emp_id=$${vals.length}` }
       if (stage === 'pending') {
-        sql += ` AND l.poc_status='approved' AND l.hr_status='pending'`
+        sql += ` AND l.poc_status='approved' AND l.hr_status IN ('pending','waiting')`
       } else if (status) {
         vals.push(status); sql += ` AND l.status=$${vals.length}`
       }
@@ -39,7 +39,7 @@ router.get('/', auth, async (req, res) => {
       // admin / general_manager / hr — sees all
       if (emp_id) { vals.push(emp_id); sql += ` AND l.emp_id=$${vals.length}` }
       if (stage === 'pending') {
-        sql += ` AND l.hr_status='approved' AND l.mgr_status='pending'`
+        sql += ` AND l.hr_status='approved' AND l.mgr_status IN ('pending','waiting')`
       } else if (status) {
         vals.push(status); sql += ` AND l.status=$${vals.length}`
       }
@@ -105,7 +105,7 @@ router.patch('/:id/hr', auth, requireRole('admin','manager'), async (req, res) =
 
     const check = await query(`SELECT poc_status FROM leaves WHERE id=$1`, [req.params.id])
     if (!check.rows[0]) return res.status(404).json({ error: 'Leave not found' })
-    if (check.rows[0].poc_status !== 'approved')
+    if (!['approved'].includes(check.rows[0].poc_status))
       return res.status(400).json({ error: 'POC must approve before manager can act' })
 
     const result = await query(`
