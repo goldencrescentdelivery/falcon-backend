@@ -3,6 +3,7 @@ const { query } = require('../db/pool')
 const { withTransaction } = require('../lib/transaction')
 const { auth, requireRole } = require('../middleware/auth')
 const V = require('../middleware/validate')
+const { payrollQueue } = require('../lib/queue')
 
 // GET /api/payroll?month=2024-12&emp_id=
 router.get('/', auth, async (req, res) => {
@@ -103,6 +104,13 @@ router.post('/mark-paid', auth, requireRole('admin','accountant'), async (req, r
   try {
     const { emp_id, month } = req.body
 
+    // If Redis/BullMQ is available, enqueue and return immediately
+    if (payrollQueue) {
+      const job = await payrollQueue.add('mark-paid', { emp_id, month, paid_by: req.user.id })
+      return res.json({ queued: true, job_id: job.id })
+    }
+
+    // Fallback: synchronous transaction (Redis unavailable)
     const payrollRecord = await withTransaction(async (client) => {
       const emp = await client.query('SELECT salary FROM employees WHERE id=$1 FOR UPDATE', [emp_id])
       const bon = await client.query(`SELECT COALESCE(SUM(amount),0) t FROM salary_bonuses    WHERE emp_id=$1 AND month=$2`, [emp_id, month])
