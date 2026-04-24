@@ -3,6 +3,8 @@ const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
 const V = require('../middleware/validate')
 const { sendPushToUsers } = require('./notifications')
+const asyncHandler = require('../lib/asyncHandler')
+const AppError     = require('../lib/AppError')
 
 router.get('/', auth, async (req, res) => {
   try {
@@ -140,15 +142,16 @@ router.patch('/:id/hr', auth, requireRole('admin','manager'), async (req, res) =
 })
 
 // PATCH /:id/manager — Step 3: Admin final approval/rejection
-router.patch('/:id/manager', auth, requireRole('admin','general_manager'), async (req, res) => {
-  try {
+router.patch('/:id/manager', auth, requireRole('admin','general_manager'),
+  asyncHandler(async (req, res) => {
     const { status } = req.body
-    if (!['approved','rejected'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
+    if (!['approved','rejected'].includes(status))
+      throw new AppError('Invalid status', 400, 'INVALID_INPUT')
 
     const check = await query(`SELECT hr_status FROM leaves WHERE id=$1`, [req.params.id])
-    if (!check.rows[0]) return res.status(404).json({ error: 'Leave not found' })
+    if (!check.rows[0]) throw new AppError('Leave not found', 404, 'NOT_FOUND')
     if (check.rows[0].hr_status !== 'approved')
-      return res.status(400).json({ error: 'Manager must approve before admin can act' })
+      throw new AppError('Manager must approve before admin can act', 400, 'INVALID_STAGE')
 
     const result = await query(`
       UPDATE leaves SET
@@ -159,9 +162,8 @@ router.patch('/:id/manager', auth, requireRole('admin','general_manager'), async
       WHERE id=$3 RETURNING *
     `, [status, req.user.id, req.params.id])
 
-    if (!result.rows[0]) return res.status(404).json({ error: 'Leave not found' })
+    if (!result.rows[0]) throw new AppError('Leave not found', 404, 'NOT_FOUND')
 
-    // Decrement annual leave balance when fully approved
     const leave = result.rows[0]
     if (status === 'approved' && leave.type === 'Annual' && leave.days > 0) {
       await query(
@@ -173,10 +175,10 @@ router.patch('/:id/manager', auth, requireRole('admin','general_manager'), async
     req.audit('FINAL_DECISION', 'leave', req.params.id,
       { mgr_status: 'pending' }, { mgr_status: status, decided_by: req.user.id })
 
-    req.io?.emit('leave:updated', result.rows[0])
-    res.json({ leave: result.rows[0] })
-  } catch (err) { console.error('LEAVE ADMIN ERR:', err.message); res.status(500).json({ error: 'Server error' }) }
-})
+    req.io?.emit('leave:updated', leave)
+    res.json({ ok: true, leave })
+  })
+)
 
 router.delete('/:id', auth, requireRole('admin','general_manager'), async (req, res) => {
   try {

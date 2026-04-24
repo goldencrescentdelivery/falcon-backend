@@ -80,11 +80,8 @@ app.use('/api/notifications',  require('./routes/notifications'))
 app.get('/health', (_req, res) => res.json({ status:'ok', ts:new Date().toISOString() }))
 
 // ── 404 & error handler ────────────────────────────────────────
-app.use((_req, res) => res.status(404).json({ error:'Route not found' }))
-app.use((err, _req, res, _next) => {
-  console.error('Global error:', err.message)
-  res.status(500).json({ error: err.message || 'Internal server error' })
-})
+app.use((_req, res) => res.status(404).json({ ok: false, error: 'Route not found' }))
+app.use(require('./middleware/error'))
 
 // ── Auto-migrate on startup ────────────────────────────────────
 async function autoMigrate() {
