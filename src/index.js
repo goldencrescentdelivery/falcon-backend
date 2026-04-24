@@ -211,6 +211,76 @@ async function autoMigrate() {
     await query(`ALTER TABLE petty_cash ADD COLUMN IF NOT EXISTS emp_id TEXT REFERENCES employees(id) ON DELETE SET NULL`)
   } catch(e) { console.warn('migrate petty_cash emp_id:', e.message) }
 
+  // Phase 5 — RBAC permissions table + seed
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS permissions (
+        id         SERIAL PRIMARY KEY,
+        role       TEXT NOT NULL,
+        resource   TEXT NOT NULL,
+        action     TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(role, resource, action)
+      )
+    `)
+    await query(`CREATE INDEX IF NOT EXISTS idx_perms_role ON permissions(role)`)
+
+    // Seed core permissions — ON CONFLICT DO NOTHING makes re-runs safe
+    const seeds = [
+      // payroll
+      ['admin',           'payroll', 'read'],
+      ['admin',           'payroll', 'mark_paid'],
+      ['admin',           'payroll', 'add_deduction'],
+      ['admin',           'payroll', 'add_bonus'],
+      ['accountant',      'payroll', 'read'],
+      ['accountant',      'payroll', 'mark_paid'],
+      ['accountant',      'payroll', 'add_deduction'],
+      ['accountant',      'payroll', 'add_bonus'],
+      ['general_manager', 'payroll', 'read'],
+      ['general_manager', 'payroll', 'add_deduction'],
+      ['general_manager', 'payroll', 'add_bonus'],
+      ['manager',         'payroll', 'read'],
+      ['manager',         'payroll', 'add_deduction'],
+      ['manager',         'payroll', 'add_bonus'],
+      // petty_cash
+      ['admin',           'petty_cash', 'read'],
+      ['admin',           'petty_cash', 'allocate'],
+      ['admin',           'petty_cash', 'delete'],
+      ['accountant',      'petty_cash', 'read'],
+      ['accountant',      'petty_cash', 'allocate'],
+      ['accountant',      'petty_cash', 'delete'],
+      ['general_manager', 'petty_cash', 'read'],
+      ['manager',         'petty_cash', 'read'],
+      // leaves
+      ['admin',           'leaves', 'read'],
+      ['admin',           'leaves', 'approve'],
+      ['admin',           'leaves', 'delete'],
+      ['general_manager', 'leaves', 'read'],
+      ['general_manager', 'leaves', 'approve'],
+      ['general_manager', 'leaves', 'delete'],
+      ['manager',         'leaves', 'read'],
+      ['manager',         'leaves', 'approve'],
+      ['poc',             'leaves', 'read'],
+      ['poc',             'leaves', 'approve'],
+      ['driver',          'leaves', 'read'],
+      // employees
+      ['admin',           'employees', 'read'],
+      ['admin',           'employees', 'write'],
+      ['admin',           'employees', 'delete'],
+      ['general_manager', 'employees', 'read'],
+      ['general_manager', 'employees', 'write'],
+      ['manager',         'employees', 'read'],
+      ['accountant',      'employees', 'read'],
+      ['poc',             'employees', 'read'],
+    ]
+    for (const [role, resource, action] of seeds) {
+      await query(
+        `INSERT INTO permissions (role, resource, action) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+        [role, resource, action]
+      )
+    }
+  } catch(e) { console.warn('migrate permissions:', e.message) }
+
   // Phase 2 — Audit log table
   try {
     await query(`

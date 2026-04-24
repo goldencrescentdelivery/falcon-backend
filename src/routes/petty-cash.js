@@ -1,6 +1,7 @@
 const router = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
+const { requirePermission } = require('../middleware/rbac')
 
 // GET /api/petty-cash/summary — admin/accountant/manager: all users with balances
 router.get('/summary', auth, requireRole('admin','accountant','general_manager','manager'), async (req, res) => {
@@ -68,7 +69,7 @@ router.get('/user/:userId', auth, requireRole('admin','accountant','general_mana
 })
 
 // POST /api/petty-cash/allocate — give cash to a user (admin/accountant only)
-router.post('/allocate', auth, requireRole('admin','accountant'), async (req, res) => {
+router.post('/allocate', auth, requireRole('admin','accountant'), requirePermission('petty_cash','allocate'), async (req, res) => {
   try {
     const { user_id, amount, note, date } = req.body
     if (!user_id || !amount) return res.status(400).json({ error: 'user_id and amount required' })
@@ -112,7 +113,7 @@ router.post('/expense', auth, async (req, res) => {
 })
 
 // DELETE /api/petty-cash/:id — admin/accountant only
-router.delete('/:id', auth, requireRole('admin','accountant'), async (req, res) => {
+router.delete('/:id', auth, requireRole('admin','accountant'), requirePermission('petty_cash','delete'), async (req, res) => {
   try {
     await query('DELETE FROM petty_cash WHERE id=$1', [req.params.id])
     req.io?.emit('petty_cash:updated', {})
