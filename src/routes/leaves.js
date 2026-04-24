@@ -5,6 +5,7 @@ const V = require('../middleware/validate')
 const { sendPushToUsers } = require('./notifications')
 const asyncHandler = require('../lib/asyncHandler')
 const AppError     = require('../lib/AppError')
+const workflow     = require('../services/workflow')
 
 router.get('/', auth, async (req, res) => {
   try {
@@ -63,6 +64,9 @@ router.post('/', auth, V.validateLeave, async (req, res) => {
       INSERT INTO leaves (emp_id, type, from_date, to_date, days, reason, poc_status, hr_status, mgr_status)
       VALUES ($1,$2,$3,$4,$5,$6,'pending','pending','pending') RETURNING *
     `, [actualEmpId, type, from_date, to_date, days, reason||null])
+    workflow.createInstance('leave_approval', 'leave', result.rows[0].id)
+      .catch(e => console.error('[workflow] createInstance:', e.message))
+
     req.io?.emit('leave:created', result.rows[0])
     res.status(201).json({ leave: result.rows[0] })
   } catch (err) { console.error('LEAVE CREATE ERR:', err.message); res.status(500).json({ error: 'Server error' }) }
@@ -95,6 +99,10 @@ router.patch('/:id/status', auth, requireRole('admin','general_manager','poc'), 
     `, [status, req.user.id, req.user.station_code||null, req.params.id])
 
     if (!result.rows[0]) return res.status(404).json({ error: 'Leave not found' })
+
+    workflow.advance('leave', req.params.id, req.user.role, status, req.user)
+      .catch(e => console.error('[workflow] advance POC:', e.message))
+
     req.io?.emit('leave:updated', result.rows[0])
     res.json({ leave: result.rows[0] })
   } catch (err) { console.error('LEAVE POC ERR:', err.message); res.status(500).json({ error: 'Server error' }) }
@@ -120,6 +128,9 @@ router.patch('/:id/hr', auth, requireRole('admin','manager'), async (req, res) =
         updated_at = NOW()
       WHERE id=$3 RETURNING *
     `, [status, req.user.id, req.params.id])
+
+    workflow.advance('leave', req.params.id, req.user.role, status, req.user)
+      .catch(e => console.error('[workflow] advance manager:', e.message))
 
     req.io?.emit('leave:updated', result.rows[0])
 
@@ -175,6 +186,9 @@ router.patch('/:id/manager', auth, requireRole('admin','general_manager'),
     req.audit('FINAL_DECISION', 'leave', req.params.id,
       { mgr_status: 'pending' }, { mgr_status: status, decided_by: req.user.id })
 
+    workflow.advance('leave', req.params.id, req.user.role, status, req.user)
+      .catch(e => console.error('[workflow] advance admin:', e.message))
+
     req.io?.emit('leave:updated', leave)
     res.json({ ok: true, leave })
   })
@@ -183,6 +197,8 @@ router.patch('/:id/manager', auth, requireRole('admin','general_manager'),
 router.delete('/:id', auth, requireRole('admin','general_manager'), async (req, res) => {
   try {
     await query('DELETE FROM leaves WHERE id=$1', [req.params.id])
+    workflow.deleteForEntity('leave', req.params.id)
+      .catch(e => console.error('[workflow] delete:', e.message))
     res.json({ message: 'Deleted' })
   } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })

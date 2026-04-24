@@ -221,6 +221,47 @@ async function autoMigrate() {
     await query(`ALTER TABLE petty_cash ADD COLUMN IF NOT EXISTS emp_id TEXT REFERENCES employees(id) ON DELETE SET NULL`)
   } catch(e) { console.warn('migrate petty_cash emp_id:', e.message) }
 
+  // Phase 9 — Workflow tables + seed
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS workflow_definitions (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        steps      JSONB NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    await query(`
+      CREATE TABLE IF NOT EXISTS workflow_instances (
+        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        definition_id TEXT REFERENCES workflow_definitions(id),
+        entity_type   TEXT NOT NULL,
+        entity_id     TEXT NOT NULL,
+        current_step  INT  DEFAULT 1,
+        status        TEXT DEFAULT 'active',
+        history       JSONB DEFAULT '[]',
+        created_at    TIMESTAMPTZ DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(entity_type, entity_id)
+      )
+    `)
+    await query(`CREATE INDEX IF NOT EXISTS idx_wi_entity ON workflow_instances(entity_type, entity_id)`)
+    await query(`CREATE INDEX IF NOT EXISTS idx_wi_status ON workflow_instances(status)`)
+
+    // Seed leave_approval definition (idempotent)
+    await query(`
+      INSERT INTO workflow_definitions (id, name, steps) VALUES (
+        'leave_approval',
+        'Leave Approval',
+        $1::jsonb
+      ) ON CONFLICT (id) DO NOTHING
+    `, [JSON.stringify([
+      { step: 1, role: 'poc',             label: 'POC Review'            },
+      { step: 2, role: 'manager',         label: 'Manager Review'        },
+      { step: 3, role: 'admin',           label: 'Admin Final Decision'  },
+    ])])
+  } catch(e) { console.warn('migrate workflow:', e.message) }
+
   // Phase 6 — Refresh tokens table
   try {
     await query(`
