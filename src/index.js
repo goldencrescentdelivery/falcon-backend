@@ -213,6 +213,52 @@ async function autoMigrate() {
     await query(`ALTER TABLE petty_cash ADD COLUMN IF NOT EXISTS emp_id TEXT REFERENCES employees(id) ON DELETE SET NULL`)
   } catch(e) { console.warn('migrate petty_cash emp_id:', e.message) }
 
+  // Phase 1 — Performance indexes
+  const indexes = [
+    // attendance — list by employee+date, by date alone, by station+date
+    `CREATE INDEX IF NOT EXISTS idx_att_emp_date      ON attendance(emp_id, date DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_att_date          ON attendance(date DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_att_station_date  ON attendance(station_code, date DESC)`,
+    // leaves — lookup by employee, approval pipeline filter, status, recency
+    `CREATE INDEX IF NOT EXISTS idx_leaves_emp        ON leaves(emp_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_leaves_approval   ON leaves(poc_status, hr_status, mgr_status)`,
+    `CREATE INDEX IF NOT EXISTS idx_leaves_status     ON leaves(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_leaves_created    ON leaves(created_at DESC)`,
+    // payroll — lookup by employee, by period, by employee+period
+    `CREATE INDEX IF NOT EXISTS idx_payroll_emp       ON payroll(emp_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_period    ON payroll(month, year)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_emp_period ON payroll(emp_id, month, year)`,
+    // petty_cash — balance queries, type filtering
+    `CREATE INDEX IF NOT EXISTS idx_pc_user_date      ON petty_cash(user_id, date DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_pc_user_type      ON petty_cash(user_id, type)`,
+    // employees — name search, station lookups
+    `CREATE INDEX IF NOT EXISTS idx_emp_name          ON employees(name)`,
+    `CREATE INDEX IF NOT EXISTS idx_emp_station       ON employees(station_code)`,
+    `CREATE INDEX IF NOT EXISTS idx_emp_status        ON employees(status)`,
+    // users — role lookups (used in notification fan-out, permission checks)
+    `CREATE INDEX IF NOT EXISTS idx_users_role        ON users(role)`,
+    `CREATE INDEX IF NOT EXISTS idx_users_station     ON users(station_code)`,
+    // vehicles — plate search, status filter
+    `CREATE INDEX IF NOT EXISTS idx_vehicles_plate    ON vehicles(plate_number)`,
+    `CREATE INDEX IF NOT EXISTS idx_vehicles_status   ON vehicles(status)`,
+    // handovers — by driver, by date
+    `CREATE INDEX IF NOT EXISTS idx_handovers_driver  ON vehicle_handovers(driver_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_handovers_date    ON vehicle_handovers(handover_date DESC)`,
+    // advances — by employee
+    `CREATE INDEX IF NOT EXISTS idx_advances_emp      ON advances(emp_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_advances_status   ON advances(status)`,
+    // expenses — by date
+    `CREATE INDEX IF NOT EXISTS idx_expenses_date     ON expenses(date DESC)`,
+    // damage — by vehicle, by date
+    `CREATE INDEX IF NOT EXISTS idx_damage_vehicle    ON damage_reports(vehicle_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_damage_date       ON damage_reports(date DESC)`,
+    // sims — by employee
+    `CREATE INDEX IF NOT EXISTS idx_sims_emp          ON sims(emp_id)`,
+  ]
+  for (const sql of indexes) {
+    try { await query(sql) } catch(e) { console.warn('index:', e.message) }
+  }
+
   console.log('Auto-migration complete')
 }
 
