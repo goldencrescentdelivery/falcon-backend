@@ -12,11 +12,7 @@ router.get('/', auth, async (req, res) => {
       LEFT JOIN employees e ON s.emp_id = e.id
       WHERE 1=1`
     const vals = []
-    if (req.user.role === 'poc') {
-      vals.push(req.user.station_code); sql += ` AND s.station_code=$${vals.length}`
-    } else {
-      if (station_code) { vals.push(station_code); sql += ` AND s.station_code=$${vals.length}` }
-    }
+    if (station_code) { vals.push(station_code); sql += ` AND s.station_code=$${vals.length}` }
     if (status) { vals.push(status); sql += ` AND s.status=$${vals.length}` }
     sql += ' ORDER BY s.status, s.sim_number'
     const result = await query(sql, vals)
