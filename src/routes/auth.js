@@ -1,17 +1,34 @@
 const router  = require('express').Router()
 const bcrypt  = require('bcryptjs')
 const jwt     = require('jsonwebtoken')
+const crypto  = require('crypto')
 const { query } = require('../db/pool')
 
-const JWT_SECRET  = process.env.JWT_SECRET || 'fallback-dev-secret-change-in-production'
-const VALID_ROLES = ['admin','manager','general_manager','hr','accountant','poc','driver']
+const JWT_SECRET     = process.env.JWT_SECRET     || 'fallback-dev-secret-change-in-production'
+const ACCESS_SECRET  = process.env.ACCESS_SECRET  || JWT_SECRET
+const REFRESH_SECRET = process.env.REFRESH_SECRET || JWT_SECRET + '-refresh'
+const VALID_ROLES    = ['admin','manager','general_manager','hr','accountant','poc','driver']
+const IS_PROD        = process.env.NODE_ENV === 'production'
 
-/* ── inline auth middleware (no external dependency issues) ── */
+const COOKIE_BASE = {
+  httpOnly: true,
+  sameSite: IS_PROD ? 'strict' : 'lax',
+  secure:   IS_PROD,
+}
+
+function hashToken(raw) {
+  return crypto.createHash('sha256').update(raw).digest('hex')
+}
+
+/* ── inline auth middleware ── */
 function verifyToken(req, res, next) {
-  const h = req.headers.authorization
-  if (!h || !h.startsWith('Bearer ')) return res.status(401).json({ error:'Authentication required' })
+  // Cookie (new) or Authorization header (legacy) — both accepted
+  const token = req.cookies?.access_token
+    || (req.headers.authorization?.startsWith('Bearer ')
+        ? req.headers.authorization.slice(7) : null)
+  if (!token) return res.status(401).json({ error:'Authentication required' })
   try {
-    req.user = jwt.verify(h.slice(7), JWT_SECRET)
+    req.user = jwt.verify(token, ACCESS_SECRET)
     next()
   } catch(e) {
     if (e.name === 'TokenExpiredError') return res.status(401).json({ error:'Session expired. Please log in again.' })
@@ -64,11 +81,24 @@ router.post('/login', async (req, res) => {
     if (user.status === 'inactive') return res.status(403).json({ error:'Account disabled.' })
 
     attempts.delete(email)
-    const token = jwt.sign(
-      { id:user.id, email:user.email, name:user.name, role:user.role, emp_id:user.emp_id, station_code:user.station_code },
-      JWT_SECRET, { expiresIn:'8h' }
+
+    const payload = { id:user.id, email:user.email, name:user.name, role:user.role, emp_id:user.emp_id, station_code:user.station_code }
+    const accessToken  = jwt.sign(payload, ACCESS_SECRET,  { expiresIn: '8h' })
+    const refreshRaw   = jwt.sign(payload, REFRESH_SECRET, { expiresIn: '7d' })
+    const family       = crypto.randomUUID()
+    const expiresAt    = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+
+    await query(
+      `INSERT INTO refresh_tokens (user_id, token_hash, family, expires_at) VALUES ($1,$2,$3,$4)`,
+      [user.id, hashToken(refreshRaw), family, expiresAt]
     )
-    res.json({ token, user:{ id:user.id, email:user.email, name:user.name, role:user.role, emp_id:user.emp_id, station_code:user.station_code, status:user.status } })
+
+    // Set HttpOnly cookies — also return token in body for backward compat
+    res.cookie('access_token',  accessToken, { ...COOKIE_BASE, maxAge: 8  * 60 * 60 * 1000 })
+    res.cookie('refresh_token', refreshRaw,  { ...COOKIE_BASE, maxAge: 7  * 24 * 60 * 60 * 1000, path: '/api/auth' })
+
+    const safeUser = { id:user.id, email:user.email, name:user.name, role:user.role, emp_id:user.emp_id, station_code:user.station_code, status:user.status }
+    res.json({ token: accessToken, user: safeUser })
   } catch(e) { console.error('LOGIN ERROR:', e.message, e.stack); res.status(500).json({ error:'Server error: '+e.message }) }
 })
 
@@ -228,19 +258,82 @@ router.delete('/users/:id', verifyToken, role('admin','general_manager'), async 
   } catch(e) { console.error('DELETE USER ERROR:', e.message); res.status(500).json({ error:'Server error: '+e.message }) }
 })
 
-/* ── POST /api/auth/refresh ── */
-router.post('/refresh', verifyToken, async (req, res) => {
+/* ── POST /api/auth/refresh — rotate refresh token ── */
+router.post('/refresh', async (req, res) => {
   try {
-    const r = await query(`SELECT id,email,name,role,emp_id,station_code,status FROM users WHERE id=$1`, [req.user.id])
-    if (!r.rows[0]) return res.status(404).json({ error:'User not found' })
-    if (r.rows[0].status === 'inactive') return res.status(403).json({ error:'Account disabled.' })
-    const user = r.rows[0]
-    const token = jwt.sign(
-      { id:user.id, email:user.email, name:user.name, role:user.role, emp_id:user.emp_id, station_code:user.station_code },
-      JWT_SECRET, { expiresIn:'8h' }
+    const refreshRaw = req.cookies?.refresh_token || req.body?.refresh_token
+    if (!refreshRaw) return res.status(401).json({ error: 'Refresh token required' })
+
+    let decoded
+    try {
+      decoded = jwt.verify(refreshRaw, REFRESH_SECRET)
+    } catch(e) {
+      res.clearCookie('access_token')
+      res.clearCookie('refresh_token', { path: '/api/auth' })
+      return res.status(401).json({ error: 'Invalid or expired refresh token' })
+    }
+
+    const hash = hashToken(refreshRaw)
+    const stored = await query(
+      `SELECT * FROM refresh_tokens WHERE token_hash=$1`, [hash]
     )
-    res.json({ token, user })
-  } catch(e) { console.error('REFRESH ERROR:', e.message); res.status(500).json({ error:'Server error' }) }
+
+    if (!stored.rows[0]) {
+      // Token not in DB — possible reuse attack: revoke entire family
+      await query(`UPDATE refresh_tokens SET revoked=true WHERE family=$1`, [stored.rows[0]?.family])
+      res.clearCookie('access_token')
+      res.clearCookie('refresh_token', { path: '/api/auth' })
+      return res.status(401).json({ error: 'Refresh token reuse detected' })
+    }
+
+    const rt = stored.rows[0]
+    if (rt.revoked || new Date(rt.expires_at) < new Date()) {
+      await query(`UPDATE refresh_tokens SET revoked=true WHERE family=$1`, [rt.family])
+      res.clearCookie('access_token')
+      res.clearCookie('refresh_token', { path: '/api/auth' })
+      return res.status(401).json({ error: 'Refresh token expired or revoked' })
+    }
+
+    const userRow = await query(
+      `SELECT id,email,name,role,emp_id,station_code,status FROM users WHERE id=$1`, [decoded.id]
+    )
+    if (!userRow.rows[0] || userRow.rows[0].status === 'inactive') {
+      return res.status(403).json({ error: 'Account disabled' })
+    }
+    const user = userRow.rows[0]
+
+    // Rotate: revoke old token, issue new pair
+    await query(`UPDATE refresh_tokens SET revoked=true WHERE id=$1`, [rt.id])
+
+    const payload      = { id:user.id, email:user.email, name:user.name, role:user.role, emp_id:user.emp_id, station_code:user.station_code }
+    const newAccess    = jwt.sign(payload, ACCESS_SECRET,  { expiresIn: '8h' })
+    const newRefreshRaw= jwt.sign(payload, REFRESH_SECRET, { expiresIn: '7d' })
+    const expiresAt    = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+
+    await query(
+      `INSERT INTO refresh_tokens (user_id, token_hash, family, expires_at) VALUES ($1,$2,$3,$4)`,
+      [user.id, hashToken(newRefreshRaw), rt.family, expiresAt]
+    )
+
+    res.cookie('access_token',  newAccess,     { ...COOKIE_BASE, maxAge: 8 * 60 * 60 * 1000 })
+    res.cookie('refresh_token', newRefreshRaw, { ...COOKIE_BASE, maxAge: 7 * 24 * 60 * 60 * 1000, path: '/api/auth' })
+
+    res.json({ token: newAccess, user })
+  } catch(e) { console.error('REFRESH ERROR:', e.message); res.status(500).json({ error: 'Server error' }) }
+})
+
+/* ── POST /api/auth/logout ── */
+router.post('/logout', async (req, res) => {
+  try {
+    const refreshRaw = req.cookies?.refresh_token || req.body?.refresh_token
+    if (refreshRaw) {
+      const hash = hashToken(refreshRaw)
+      await query(`UPDATE refresh_tokens SET revoked=true WHERE token_hash=$1`, [hash]).catch(() => {})
+    }
+    res.clearCookie('access_token')
+    res.clearCookie('refresh_token', { path: '/api/auth' })
+    res.json({ ok: true })
+  } catch(e) { res.status(500).json({ error: 'Server error' }) }
 })
 
 module.exports = router

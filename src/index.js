@@ -5,7 +5,8 @@ const { Server } = require('socket.io')
 const cors       = require('cors')
 const helmet     = require('helmet')
 const morgan     = require('morgan')
-const rateLimit  = require('express-rate-limit')
+const rateLimit    = require('express-rate-limit')
+const cookieParser = require('cookie-parser')
 
 const app    = express()
 const server = http.createServer(app)
@@ -27,6 +28,7 @@ app.use(cors({
   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization']
 }))
+app.use(cookieParser())
 app.use(express.json({ limit: '10mb' }))
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
 
@@ -210,6 +212,24 @@ async function autoMigrate() {
   try {
     await query(`ALTER TABLE petty_cash ADD COLUMN IF NOT EXISTS emp_id TEXT REFERENCES employees(id) ON DELETE SET NULL`)
   } catch(e) { console.warn('migrate petty_cash emp_id:', e.message) }
+
+  // Phase 6 — Refresh tokens table
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS refresh_tokens (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash  TEXT NOT NULL UNIQUE,
+        family      UUID NOT NULL,
+        revoked     BOOLEAN DEFAULT FALSE,
+        expires_at  TIMESTAMPTZ NOT NULL,
+        created_at  TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    await query(`CREATE INDEX IF NOT EXISTS idx_rt_user    ON refresh_tokens(user_id)`)
+    await query(`CREATE INDEX IF NOT EXISTS idx_rt_family  ON refresh_tokens(family)`)
+    await query(`CREATE INDEX IF NOT EXISTS idx_rt_hash    ON refresh_tokens(token_hash)`)
+  } catch(e) { console.warn('migrate refresh_tokens:', e.message) }
 
   // Phase 5 — RBAC permissions table + seed
   try {
