@@ -1,5 +1,6 @@
 const router  = require('express').Router()
 const { query } = require('../db/pool')
+const { withTransaction } = require('../lib/transaction')
 const { auth, requireRole } = require('../middleware/auth')
 const V = require('../middleware/validate')
 
@@ -101,28 +102,32 @@ router.post('/bonuses', auth, V.validatePayrollBonus, requireRole('admin','manag
 router.post('/mark-paid', auth, requireRole('admin','accountant'), async (req, res) => {
   try {
     const { emp_id, month } = req.body
-    // Recalculate totals on the fly
-    const emp = await query('SELECT salary FROM employees WHERE id=$1', [emp_id])
-    const bon = await query(`SELECT COALESCE(SUM(amount),0) t FROM salary_bonuses WHERE emp_id=$1 AND month=$2`, [emp_id, month])
-    const ded = await query(`SELECT COALESCE(SUM(amount),0) t FROM salary_deductions WHERE emp_id=$1 AND month=$2`, [emp_id, month])
 
-    const base   = parseFloat(emp.rows[0]?.salary || 0)
-    const bonus  = parseFloat(bon.rows[0].t)
-    const deduct = parseFloat(ded.rows[0].t)
-    const net    = base + bonus - deduct
+    const payrollRecord = await withTransaction(async (client) => {
+      const emp = await client.query('SELECT salary FROM employees WHERE id=$1 FOR UPDATE', [emp_id])
+      const bon = await client.query(`SELECT COALESCE(SUM(amount),0) t FROM salary_bonuses    WHERE emp_id=$1 AND month=$2`, [emp_id, month])
+      const ded = await client.query(`SELECT COALESCE(SUM(amount),0) t FROM salary_deductions WHERE emp_id=$1 AND month=$2`, [emp_id, month])
 
-    const result = await query(`
-      INSERT INTO payroll (emp_id, month, base_salary, total_bonuses, total_deductions, net_pay, status, paid_on, paid_by)
-      VALUES ($1,$2,$3,$4,$5,$6,'paid',NOW(),$7)
-      ON CONFLICT (emp_id, month) DO UPDATE SET status='paid', paid_on=NOW(), net_pay=$6, paid_by=$7, total_bonuses=$4, total_deductions=$5
-      RETURNING *
-    `, [emp_id, month, base, bonus, deduct, net, req.user.id])
+      const base   = parseFloat(emp.rows[0]?.salary || 0)
+      const bonus  = parseFloat(bon.rows[0].t)
+      const deduct = parseFloat(ded.rows[0].t)
+      const net    = base + bonus - deduct
 
-    req.audit('MARK_PAID', 'payroll', result.rows[0].id,
-      null, { emp_id, month, net_pay: net, paid_by: req.user.id })
+      const result = await client.query(`
+        INSERT INTO payroll (emp_id, month, base_salary, total_bonuses, total_deductions, net_pay, status, paid_on, paid_by)
+        VALUES ($1,$2,$3,$4,$5,$6,'paid',NOW(),$7)
+        ON CONFLICT (emp_id, month) DO UPDATE SET status='paid', paid_on=NOW(), net_pay=$6, paid_by=$7, total_bonuses=$4, total_deductions=$5
+        RETURNING *
+      `, [emp_id, month, base, bonus, deduct, net, req.user.id])
 
-    req.io?.emit('payroll:paid', result.rows[0])
-    res.json({ payroll: result.rows[0] })
+      return result.rows[0]
+    })
+
+    req.audit('MARK_PAID', 'payroll', payrollRecord.id,
+      null, { emp_id, month, net_pay: payrollRecord.net_pay, paid_by: req.user.id })
+
+    req.io?.emit('payroll:paid', payrollRecord)
+    res.json({ payroll: payrollRecord })
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Server error' })
   }
