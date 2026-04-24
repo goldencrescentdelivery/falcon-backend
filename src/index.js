@@ -14,8 +14,16 @@ const server = http.createServer(app)
 app.set('trust proxy', 1)
 
 // ── Socket.io ──────────────────────────────────────────────────
+const SOCKET_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : (process.env.NODE_ENV === 'production' ? [] : ['http://localhost:3000'])
+
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET','POST','PUT','PATCH','DELETE'] }
+  cors: {
+    origin:      SOCKET_ORIGINS,
+    methods:     ['GET', 'POST'],
+    credentials: true,
+  }
 })
 require('./socket')(io)
 
