@@ -85,6 +85,7 @@ router.patch('/:id/status', auth, requireRole('admin','general_manager','poc'), 
         poc_id          = $2,
         poc_station     = $3,
         approved_by_poc = $2,
+        hr_status       = CASE WHEN $1='approved' THEN 'pending' ELSE hr_status END,
         status          = CASE WHEN $1='rejected' THEN 'rejected' ELSE status END,
         updated_at      = NOW()
       WHERE id=$4 RETURNING *
@@ -111,6 +112,7 @@ router.patch('/:id/hr', auth, requireRole('admin','manager'), async (req, res) =
       UPDATE leaves SET
         hr_status  = $1,
         hr_id      = $2,
+        mgr_status = CASE WHEN $1='approved' THEN 'pending' ELSE mgr_status END,
         status     = CASE WHEN $1='rejected' THEN 'rejected' ELSE status END,
         updated_at = NOW()
       WHERE id=$3 RETURNING *
