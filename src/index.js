@@ -208,6 +208,11 @@ async function autoMigrate() {
     await query(`CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id)`)
   } catch(e) { console.warn('migrate push_subscriptions:', e.message) }
 
+  // petty_cash emp_id column for driver association
+  try {
+    await query(`ALTER TABLE petty_cash ADD COLUMN IF NOT EXISTS emp_id TEXT REFERENCES employees(id) ON DELETE SET NULL`)
+  } catch(e) { console.warn('migrate petty_cash emp_id:', e.message) }
+
   console.log('Auto-migration complete')
 }
 
