@@ -31,7 +31,7 @@ router.get('/', auth, async (req, res) => {
     } else if (req.user.role === 'manager') {
       if (emp_id) { vals.push(emp_id); sql += ` AND l.emp_id=$${vals.length}` }
       if (stage === 'pending') {
-        sql += ` AND l.poc_status='approved' AND l.hr_status IN ('pending','waiting')`
+        sql += ` AND l.poc_status='approved' AND l.hr_status NOT IN ('approved','rejected')`
       } else if (status) {
         vals.push(status); sql += ` AND l.status=$${vals.length}`
       }
@@ -39,7 +39,7 @@ router.get('/', auth, async (req, res) => {
       // admin / general_manager / hr — sees all
       if (emp_id) { vals.push(emp_id); sql += ` AND l.emp_id=$${vals.length}` }
       if (stage === 'pending') {
-        sql += ` AND l.hr_status='approved' AND l.mgr_status IN ('pending','waiting')`
+        sql += ` AND l.hr_status='approved' AND l.mgr_status NOT IN ('approved','rejected')`
       } else if (status) {
         vals.push(status); sql += ` AND l.status=$${vals.length}`
       }
