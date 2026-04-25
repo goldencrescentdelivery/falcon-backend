@@ -83,28 +83,7 @@ router.get('/', auth, async (req, res) => {
   } catch (err) { console.error('GET /handovers:', err.message); res.status(500).json({ error: err.message }) }
 })
 
-// GET /api/handovers/:id — full detail with photos
-router.get('/:id', auth, async (req, res) => {
-  try {
-    const result = await query(`
-      SELECT h.*,
-             e.name  AS emp_name,
-             v.plate AS vehicle_plate, v.make, v.model, v.station_code AS vehicle_station
-      FROM vehicle_handovers h
-      JOIN employees e ON h.emp_id=e.id
-      JOIN vehicles  v ON h.vehicle_id=v.id
-      WHERE h.id=$1
-    `, [req.params.id])
-    if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
-    const h = result.rows[0]
-    // Drivers can only see their own
-    if (req.user.role === 'driver' && h.emp_id !== req.user.emp_id)
-      return res.status(403).json({ error: 'Forbidden' })
-    res.json({ handover: h })
-  } catch (err) { res.status(500).json({ error: 'Server error' }) }
-})
-
-// GET /api/handovers/current
+// GET /api/handovers/current  ← must come BEFORE /:id
 router.get('/current', auth, async (req, res) => {
   try {
     const { station_code } = req.query
@@ -127,6 +106,26 @@ router.get('/current', auth, async (req, res) => {
     const result = await query(sql, vals)
     res.json({ current: result.rows })
   } catch (err) { console.error('GET /handovers/current:', err.message); res.status(500).json({ error: err.message }) }
+})
+
+// GET /api/handovers/:id — full detail with photos
+router.get('/:id', auth, async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT h.*,
+             e.name  AS emp_name,
+             v.plate AS vehicle_plate, v.make, v.model, v.station_code AS vehicle_station
+      FROM vehicle_handovers h
+      JOIN employees e ON h.emp_id=e.id
+      JOIN vehicles  v ON h.vehicle_id=v.id
+      WHERE h.id=$1
+    `, [req.params.id])
+    if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
+    const h = result.rows[0]
+    if (req.user.role === 'driver' && h.emp_id !== req.user.emp_id)
+      return res.status(403).json({ error: 'Forbidden' })
+    res.json({ handover: h })
+  } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })
 
 // POST /api/handovers
@@ -187,7 +186,11 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
 
     const final = await query('SELECT * FROM vehicle_handovers WHERE id=$1', [handover.id])
     req.io?.emit('handover:created', final.rows[0])
-    res.status(201).json({ handover: final.rows[0] })
+    const photosUploaded = photoUrls.filter(Boolean).length
+    const photosWarning = req.files?.length && photosUploaded === 0
+      ? 'Photos could not be saved — Supabase storage may not be configured'
+      : null
+    res.status(201).json({ handover: final.rows[0], photos_uploaded: photosUploaded, photos_warning: photosWarning })
   } catch (err) {
     console.error('POST /handovers:', err.message)
     if (err.message.includes('foreign key')) return res.status(400).json({ error: 'Invalid vehicle or employee ID' })
