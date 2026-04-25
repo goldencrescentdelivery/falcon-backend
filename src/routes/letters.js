@@ -53,6 +53,33 @@ router.post('/', auth, ALLOWED, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
+// PUT /api/letters/:id
+router.put('/:id', auth, ALLOWED, async (req, res) => {
+  try {
+    const { date, to_name, subject, greeting, body } = req.body
+    if (!body?.trim()) return res.status(400).json({ error: 'body is required' })
+
+    const existing = await query(`SELECT created_by FROM office_letters WHERE id=$1`, [req.params.id])
+    if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' })
+    if (req.user.role !== 'admin' && String(existing.rows[0].created_by) !== String(req.user.id))
+      return res.status(403).json({ error: 'You can only edit your own letters' })
+
+    const result = await query(`
+      UPDATE office_letters
+      SET date=$1, to_name=$2, subject=$3, greeting=$4, body=$5
+      WHERE id=$6 RETURNING *
+    `, [
+      date || new Date().toISOString().split('T')[0],
+      to_name  || null,
+      subject  || null,
+      greeting || 'Dear Sir / Madam,',
+      body.trim(),
+      req.params.id,
+    ])
+    res.json({ letter: result.rows[0] })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
 // DELETE /api/letters/:id  (admin only)
 router.delete('/:id', auth, requireRole('admin'), async (req, res) => {
   try {
