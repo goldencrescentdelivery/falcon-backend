@@ -24,7 +24,7 @@ async function ensureBucket() {
   const creds = sbCreds()
   if (!creds) return
   const headers = { Authorization: `Bearer ${creds.key}`, 'Content-Type': 'application/json' }
-  const body    = JSON.stringify({ id: BUCKET, name: BUCKET, public: true, fileSizeLimit: FILE_SIZE_MAX })
+  const body    = JSON.stringify({ id: BUCKET, name: BUCKET, public: true, file_size_limit: FILE_SIZE_MAX })
   try {
     const r = await fetch(`${creds.url}/storage/v1/bucket`, { method: 'POST', headers, body })
     const d = await r.json()
@@ -32,10 +32,10 @@ async function ensureBucket() {
     if (r.ok) {
       console.log('[handovers] vehicle-photos bucket created')
     } else if (alreadyExists) {
-      // Update existing bucket to apply correct fileSizeLimit
+      // Update existing bucket to apply correct file_size_limit
       await fetch(`${creds.url}/storage/v1/bucket/${BUCKET}`, {
         method: 'PUT', headers,
-        body: JSON.stringify({ public: true, fileSizeLimit: FILE_SIZE_MAX }),
+        body: JSON.stringify({ public: true, file_size_limit: FILE_SIZE_MAX }),
       })
       console.log('[handovers] vehicle-photos bucket settings updated')
     } else {
