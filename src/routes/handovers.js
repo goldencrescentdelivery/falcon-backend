@@ -51,21 +51,26 @@ async function deletePhotos(photoUrls) {
 // GET /api/handovers
 router.get('/', auth, async (req, res) => {
   try {
-    const { vehicle_id, emp_id, type, limit } = req.query
+    const { vehicle_id, emp_id, type, limit, station_code } = req.query
     let sql = `
       SELECT h.*,
              e.name  AS emp_name,
-             v.plate AS vehicle_plate, v.make, v.model
+             v.plate AS vehicle_plate, v.make, v.model, v.station_code AS vehicle_station
       FROM vehicle_handovers h
       JOIN employees e ON h.emp_id=e.id
       JOIN vehicles  v ON h.vehicle_id=v.id
       WHERE 1=1`
     const vals = []
+
     if (req.user.role === 'driver') {
       vals.push(req.user.emp_id); sql += ` AND h.emp_id=$${vals.length}`
+    } else if (req.user.role === 'poc') {
+      vals.push(req.user.station_code); sql += ` AND h.station_code=$${vals.length}`
     } else {
-      if (emp_id)     { vals.push(emp_id);     sql += ` AND h.emp_id=$${vals.length}` }
-      if (vehicle_id) { vals.push(vehicle_id); sql += ` AND h.vehicle_id=$${vals.length}` }
+      // admin / general_manager / manager / accountant — full visibility
+      if (emp_id)       { vals.push(emp_id);       sql += ` AND h.emp_id=$${vals.length}` }
+      if (vehicle_id)   { vals.push(vehicle_id);   sql += ` AND h.vehicle_id=$${vals.length}` }
+      if (station_code) { vals.push(station_code); sql += ` AND h.station_code=$${vals.length}` }
     }
     if (type) { vals.push(type); sql += ` AND h.type=$${vals.length}` }
     sql += ` ORDER BY h.submitted_at DESC`
@@ -73,6 +78,27 @@ router.get('/', auth, async (req, res) => {
     const result = await query(sql, vals)
     res.json({ handovers: result.rows })
   } catch (err) { console.error('GET /handovers:', err.message); res.status(500).json({ error: err.message }) }
+})
+
+// GET /api/handovers/:id — full detail with photos
+router.get('/:id', auth, async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT h.*,
+             e.name  AS emp_name,
+             v.plate AS vehicle_plate, v.make, v.model, v.station_code AS vehicle_station
+      FROM vehicle_handovers h
+      JOIN employees e ON h.emp_id=e.id
+      JOIN vehicles  v ON h.vehicle_id=v.id
+      WHERE h.id=$1
+    `, [req.params.id])
+    if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
+    const h = result.rows[0]
+    // Drivers can only see their own
+    if (req.user.role === 'driver' && h.emp_id !== req.user.emp_id)
+      return res.status(403).json({ error: 'Forbidden' })
+    res.json({ handover: h })
+  } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })
 
 // GET /api/handovers/current

@@ -221,6 +221,13 @@ async function autoMigrate() {
     await query(`ALTER TABLE petty_cash ADD COLUMN IF NOT EXISTS emp_id TEXT REFERENCES employees(id) ON DELETE SET NULL`)
   } catch(e) { console.warn('migrate petty_cash emp_id:', e.message) }
 
+  // vehicle_handovers photo expiry columns
+  try {
+    await query(`ALTER TABLE vehicle_handovers ADD COLUMN IF NOT EXISTS photos_expire_at TIMESTAMPTZ`)
+    await query(`ALTER TABLE vehicle_handovers ADD COLUMN IF NOT EXISTS photos_cleaned BOOLEAN DEFAULT FALSE`)
+    await query(`CREATE INDEX IF NOT EXISTS idx_hv_photos_expire ON vehicle_handovers(photos_expire_at) WHERE photos_cleaned=false`)
+  } catch(e) { console.warn('migrate vehicle_handovers photo expiry:', e.message) }
+
   // Phase 9 — Workflow tables + seed
   try {
     await query(`
