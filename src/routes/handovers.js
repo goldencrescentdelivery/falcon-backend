@@ -23,18 +23,21 @@ function getSupabase() {
 
 async function uploadPhotos(files, handoverId) {
   const supabase = getSupabase()
-  if (!supabase || !files?.length) return []
+  if (!supabase) { console.warn('[handovers] Supabase not configured — photos skipped'); return [] }
+  if (!files?.length) return []
+  console.log(`[handovers] uploading ${files.length} photo(s) for handover ${handoverId}`)
   const urls = []
   for (let i = 0; i < Math.min(files.length, 4); i++) {
     const file = files[i]
-    const ext  = file.originalname?.split('.').pop() || 'jpg'
+    const ext  = (file.originalname?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
     const path = `handovers/${handoverId}/photo_${i+1}_${Date.now()}.${ext}`
     const { error } = await supabase.storage.from('vehicle-photos').upload(path, file.buffer, { contentType: file.mimetype, upsert: true })
     if (!error) {
       const { data } = supabase.storage.from('vehicle-photos').getPublicUrl(path)
+      console.log(`[handovers] photo ${i+1} uploaded: ${data.publicUrl}`)
       urls.push(data.publicUrl)
     } else {
-      console.error('Photo upload error:', error.message)
+      console.error(`[handovers] photo ${i+1} upload failed:`, error.message)
       urls.push(null)
     }
   }
