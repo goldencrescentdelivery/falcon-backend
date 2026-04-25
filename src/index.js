@@ -84,6 +84,7 @@ app.use('/api/damage',      require('./routes/damage'))
 app.use('/api/advances',    require('./routes/advances'))
 app.use('/api/petty-cash',  require('./routes/petty-cash'))
 app.use('/api/office',         require('./routes/office'))
+app.use('/api/letters',        require('./routes/letters'))
 app.use('/api/notifications',  require('./routes/notifications'))
 
 // ── Health check ───────────────────────────────────────────────
@@ -220,6 +221,25 @@ async function autoMigrate() {
   try {
     await query(`ALTER TABLE petty_cash ADD COLUMN IF NOT EXISTS emp_id TEXT REFERENCES employees(id) ON DELETE SET NULL`)
   } catch(e) { console.warn('migrate petty_cash emp_id:', e.message) }
+
+  // office_letters
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS office_letters (
+        id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        ref_no           VARCHAR(30) UNIQUE NOT NULL,
+        date             DATE NOT NULL DEFAULT CURRENT_DATE,
+        to_name          TEXT,
+        subject          TEXT,
+        greeting         TEXT DEFAULT 'Dear Sir / Madam,',
+        body             TEXT NOT NULL,
+        created_by       TEXT,
+        created_by_name  TEXT,
+        created_at       TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    await query(`CREATE INDEX IF NOT EXISTS idx_letters_created ON office_letters(created_at DESC)`)
+  } catch(e) { console.warn('migrate office_letters:', e.message) }
 
   // vehicle_handovers photo columns + expiry
   try {
