@@ -21,12 +21,26 @@ function getSupabase() {
   return createClient(url, key)
 }
 
+// Ensure bucket exists at startup — safe to call multiple times
+async function ensureBucket() {
+  const supabase = getSupabase()
+  if (!supabase) return
+  const { error } = await supabase.storage.createBucket('vehicle-photos', { public: true })
+  if (error && !error.message.toLowerCase().includes('already exists')) {
+    console.warn('[handovers] bucket init warning:', error.message)
+  } else {
+    console.log('[handovers] vehicle-photos bucket ready')
+  }
+}
+ensureBucket().catch(() => {})
+
 async function uploadPhotos(files, handoverId) {
   const supabase = getSupabase()
-  if (!supabase) { console.warn('[handovers] Supabase not configured — photos skipped'); return [] }
-  if (!files?.length) return []
+  if (!supabase) { console.warn('[handovers] Supabase not configured — photos skipped'); return { urls: [], error: 'Supabase not configured' } }
+  if (!files?.length) return { urls: [], error: null }
   console.log(`[handovers] uploading ${files.length} photo(s) for handover ${handoverId}`)
   const urls = []
+  let firstError = null
   for (let i = 0; i < Math.min(files.length, 4); i++) {
     const file = files[i]
     const ext  = (file.originalname?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
@@ -38,10 +52,11 @@ async function uploadPhotos(files, handoverId) {
       urls.push(data.publicUrl)
     } else {
       console.error(`[handovers] photo ${i+1} upload failed:`, error.message)
+      if (!firstError) firstError = error.message
       urls.push(null)
     }
   }
-  return urls
+  return { urls, error: firstError }
 }
 
 async function deletePhotos(photoUrls) {
@@ -174,9 +189,11 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
     const handover = result.rows[0]
 
     // Upload photos if available
-    let photoUrls = []
+    let photoUrls = [], uploadError = null
     if (req.files?.length) {
-      photoUrls = await uploadPhotos(req.files, handover.id)
+      const result = await uploadPhotos(req.files, handover.id)
+      photoUrls  = result.urls
+      uploadError = result.error
       if (photoUrls.filter(Boolean).length > 0) {
         await query(`
           UPDATE vehicle_handovers SET photo_1=$1,photo_2=$2,photo_3=$3,photo_4=$4 WHERE id=$5
@@ -188,7 +205,7 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
     req.io?.emit('handover:created', final.rows[0])
     const photosUploaded = photoUrls.filter(Boolean).length
     const photosWarning = req.files?.length && photosUploaded === 0
-      ? 'Photos could not be saved — Supabase storage may not be configured'
+      ? `Photos could not be saved: ${uploadError || 'unknown error'}`
       : null
     res.status(201).json({ handover: final.rows[0], photos_uploaded: photosUploaded, photos_warning: photosWarning })
   } catch (err) {
