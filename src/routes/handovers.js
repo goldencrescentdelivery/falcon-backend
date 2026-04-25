@@ -16,19 +16,28 @@ function sbCreds() {
   return (url && key) ? { url, key } : null
 }
 
-// Ensure bucket exists — uses REST API directly to avoid supabase-js quirks
+const BUCKET        = 'vehicle-photos'
+const FILE_SIZE_MAX = 52428800 // 50 MB
+
+// Ensure bucket exists with correct settings — runs at startup
 async function ensureBucket() {
   const creds = sbCreds()
   if (!creds) return
+  const headers = { Authorization: `Bearer ${creds.key}`, 'Content-Type': 'application/json' }
+  const body    = JSON.stringify({ id: BUCKET, name: BUCKET, public: true, fileSizeLimit: FILE_SIZE_MAX })
   try {
-    const r = await fetch(`${creds.url}/storage/v1/bucket`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${creds.key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: 'vehicle-photos', name: 'vehicle-photos', public: true }),
-    })
+    const r = await fetch(`${creds.url}/storage/v1/bucket`, { method: 'POST', headers, body })
     const d = await r.json()
-    if (r.ok || (d.error || '').toLowerCase().includes('already exists') || (d.message || '').toLowerCase().includes('already exists')) {
-      console.log('[handovers] vehicle-photos bucket ready')
+    const alreadyExists = (d.error || d.message || '').toLowerCase().includes('already exists')
+    if (r.ok) {
+      console.log('[handovers] vehicle-photos bucket created')
+    } else if (alreadyExists) {
+      // Update existing bucket to apply correct fileSizeLimit
+      await fetch(`${creds.url}/storage/v1/bucket/${BUCKET}`, {
+        method: 'PUT', headers,
+        body: JSON.stringify({ public: true, fileSizeLimit: FILE_SIZE_MAX }),
+      })
+      console.log('[handovers] vehicle-photos bucket settings updated')
     } else {
       console.warn('[handovers] bucket init:', d.message || d.error)
     }
@@ -48,13 +57,13 @@ async function uploadPhotos(files, handoverId) {
     const ext  = (file.originalname?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
     const objPath = `handovers/${handoverId}/photo_${i + 1}_${Date.now()}.${ext}`
     try {
-      const r = await fetch(`${creds.url}/storage/v1/object/vehicle-photos/${objPath}`, {
+      const r = await fetch(`${creds.url}/storage/v1/object/${BUCKET}/${objPath}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${creds.key}`, 'Content-Type': file.mimetype, 'x-upsert': 'true' },
         body: file.buffer,
       })
       if (r.ok) {
-        const publicUrl = `${creds.url}/storage/v1/object/public/vehicle-photos/${objPath}`
+        const publicUrl = `${creds.url}/storage/v1/object/public/${BUCKET}/${objPath}`
         console.log(`[handovers] photo ${i + 1} uploaded: ${publicUrl}`)
         urls.push(publicUrl)
       } else {
