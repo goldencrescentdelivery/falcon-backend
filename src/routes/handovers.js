@@ -2,41 +2,43 @@ const router  = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
 
-// Try to load optional dependencies
+// Try to load multer (optional)
 let multer = null
-let createClient = null
 try { multer = require('multer') } catch(e) { console.log('multer not available - photo upload disabled') }
-try { createClient = require('@supabase/supabase-js').createClient } catch(e) { console.log('supabase not available') }
 
-// Setup multer if available
 const upload = multer
   ? multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: (req, file, cb) => { if (file.mimetype.startsWith('image/')) cb(null, true); else cb(new Error('Only images')) } })
-  : { array: () => (req, res, next) => next() }  // no-op middleware
+  : { array: () => (req, res, next) => next() }
 
-function getSupabase() {
-  if (!createClient) return null
+function sbCreds() {
   const url = process.env.SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_KEY
-  if (!url || !key) return null
-  return createClient(url, key)
+  return (url && key) ? { url, key } : null
 }
 
-// Ensure bucket exists at startup — safe to call multiple times
+// Ensure bucket exists — uses REST API directly to avoid supabase-js quirks
 async function ensureBucket() {
-  const supabase = getSupabase()
-  if (!supabase) return
-  const { error } = await supabase.storage.createBucket('vehicle-photos', { public: true })
-  if (error && !error.message.toLowerCase().includes('already exists')) {
-    console.warn('[handovers] bucket init warning:', error.message)
-  } else {
-    console.log('[handovers] vehicle-photos bucket ready')
-  }
+  const creds = sbCreds()
+  if (!creds) return
+  try {
+    const r = await fetch(`${creds.url}/storage/v1/bucket`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${creds.key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'vehicle-photos', name: 'vehicle-photos', public: true }),
+    })
+    const d = await r.json()
+    if (r.ok || (d.error || '').toLowerCase().includes('already exists') || (d.message || '').toLowerCase().includes('already exists')) {
+      console.log('[handovers] vehicle-photos bucket ready')
+    } else {
+      console.warn('[handovers] bucket init:', d.message || d.error)
+    }
+  } catch (e) { console.warn('[handovers] bucket init failed:', e.message) }
 }
 ensureBucket().catch(() => {})
 
 async function uploadPhotos(files, handoverId) {
-  const supabase = getSupabase()
-  if (!supabase) { console.warn('[handovers] Supabase not configured — photos skipped'); return { urls: [], error: 'Supabase not configured' } }
+  const creds = sbCreds()
+  if (!creds) { console.warn('[handovers] Supabase not configured — photos skipped'); return { urls: [], error: 'Supabase not configured' } }
   if (!files?.length) return { urls: [], error: null }
   console.log(`[handovers] uploading ${files.length} photo(s) for handover ${handoverId}`)
   const urls = []
@@ -44,15 +46,27 @@ async function uploadPhotos(files, handoverId) {
   for (let i = 0; i < Math.min(files.length, 4); i++) {
     const file = files[i]
     const ext  = (file.originalname?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
-    const path = `handovers/${handoverId}/photo_${i+1}_${Date.now()}.${ext}`
-    const { error } = await supabase.storage.from('vehicle-photos').upload(path, file.buffer, { contentType: file.mimetype, upsert: true })
-    if (!error) {
-      const { data } = supabase.storage.from('vehicle-photos').getPublicUrl(path)
-      console.log(`[handovers] photo ${i+1} uploaded: ${data.publicUrl}`)
-      urls.push(data.publicUrl)
-    } else {
-      console.error(`[handovers] photo ${i+1} upload failed:`, error.message)
-      if (!firstError) firstError = error.message
+    const objPath = `handovers/${handoverId}/photo_${i + 1}_${Date.now()}.${ext}`
+    try {
+      const r = await fetch(`${creds.url}/storage/v1/object/vehicle-photos/${objPath}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${creds.key}`, 'Content-Type': file.mimetype, 'x-upsert': 'true' },
+        body: file.buffer,
+      })
+      if (r.ok) {
+        const publicUrl = `${creds.url}/storage/v1/object/public/vehicle-photos/${objPath}`
+        console.log(`[handovers] photo ${i + 1} uploaded: ${publicUrl}`)
+        urls.push(publicUrl)
+      } else {
+        const d = await r.json().catch(() => ({}))
+        const msg = d.message || d.error || r.statusText
+        console.error(`[handovers] photo ${i + 1} failed (${r.status}):`, msg)
+        if (!firstError) firstError = msg
+        urls.push(null)
+      }
+    } catch (e) {
+      console.error(`[handovers] photo ${i + 1} exception:`, e.message)
+      if (!firstError) firstError = e.message
       urls.push(null)
     }
   }
@@ -60,10 +74,17 @@ async function uploadPhotos(files, handoverId) {
 }
 
 async function deletePhotos(photoUrls) {
-  const supabase = getSupabase()
-  if (!supabase) return
-  const paths = photoUrls.filter(Boolean).map(url => { const m=url.match(/vehicle-photos\/(.+)/); return m?m[1]:null }).filter(Boolean)
-  if (paths.length) await supabase.storage.from('vehicle-photos').remove(paths)
+  const creds = sbCreds()
+  if (!creds) return
+  const paths = photoUrls.filter(Boolean).map(url => { const m = url.match(/vehicle-photos\/(.+)/); return m ? m[1] : null }).filter(Boolean)
+  if (!paths.length) return
+  try {
+    await fetch(`${creds.url}/storage/v1/object/vehicle-photos`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${creds.key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prefixes: paths }),
+    })
+  } catch (e) { console.warn('[handovers] deletePhotos failed:', e.message) }
 }
 
 // GET /api/handovers
