@@ -49,36 +49,37 @@ async function uploadPhotos(files, handoverId) {
   const creds = sbCreds()
   if (!creds) { console.warn('[handovers] Supabase not configured — photos skipped'); return { urls: [], error: 'Supabase not configured' } }
   if (!files?.length) return { urls: [], error: null }
-  console.log(`[handovers] uploading ${files.length} photo(s) for handover ${handoverId}`)
-  const urls = []
-  let firstError = null
-  for (let i = 0; i < Math.min(files.length, 4); i++) {
-    const file = files[i]
-    const ext  = (file.originalname?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
-    const objPath = `handovers/${handoverId}/photo_${i + 1}_${Date.now()}.${ext}`
-    try {
-      const r = await fetch(`${creds.url}/storage/v1/object/${BUCKET}/${objPath}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${creds.key}`, 'Content-Type': file.mimetype, 'x-upsert': 'true' },
-        body: file.buffer,
-      })
-      if (r.ok) {
-        const publicUrl = `${creds.url}/storage/v1/object/public/${BUCKET}/${objPath}`
-        console.log(`[handovers] photo ${i + 1} uploaded: ${publicUrl}`)
-        urls.push(publicUrl)
-      } else {
+  const ts = Date.now()
+  console.log(`[handovers] uploading ${files.length} photo(s) in parallel for handover ${handoverId}`)
+
+  const results = await Promise.all(
+    files.slice(0, 4).map(async (file, i) => {
+      const ext     = (file.originalname?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
+      const objPath = `handovers/${handoverId}/photo_${i + 1}_${ts}.${ext}`
+      try {
+        const r = await fetch(`${creds.url}/storage/v1/object/${BUCKET}/${objPath}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${creds.key}`, 'Content-Type': file.mimetype, 'x-upsert': 'true' },
+          body: file.buffer,
+        })
+        if (r.ok) {
+          const publicUrl = `${creds.url}/storage/v1/object/public/${BUCKET}/${objPath}`
+          console.log(`[handovers] photo ${i + 1} uploaded: ${publicUrl}`)
+          return { url: publicUrl, error: null }
+        }
         const d = await r.json().catch(() => ({}))
         const msg = d.message || d.error || r.statusText
         console.error(`[handovers] photo ${i + 1} failed (${r.status}):`, msg)
-        if (!firstError) firstError = msg
-        urls.push(null)
+        return { url: null, error: msg }
+      } catch (e) {
+        console.error(`[handovers] photo ${i + 1} exception:`, e.message)
+        return { url: null, error: e.message }
       }
-    } catch (e) {
-      console.error(`[handovers] photo ${i + 1} exception:`, e.message)
-      if (!firstError) firstError = e.message
-      urls.push(null)
-    }
-  }
+    })
+  )
+
+  const urls       = results.map(r => r.url)
+  const firstError = results.find(r => r.error)?.error || null
   return { urls, error: firstError }
 }
 
