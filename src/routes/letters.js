@@ -1,8 +1,38 @@
 const router = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
+const { sendPushToUsers } = require('./notifications')
 
 const ALLOWED = requireRole('admin', 'general_manager', 'hr', 'accountant')
+
+async function notifyAdminsLetterPending(letter, submitterName) {
+  try {
+    const admins = await query(
+      `SELECT id FROM users WHERE role = 'admin' AND status = 'active'`
+    )
+    const adminIds = admins.rows.map(r => r.id)
+    if (!adminIds.length) return
+
+    // In-app notifications
+    for (const uid of adminIds) {
+      await query(
+        `INSERT INTO notifications (user_id, title, body, type, ref_id)
+         VALUES ($1, $2, $3, 'letter_approval', $4)`,
+        [uid,
+         '📄 Letter Awaiting Approval',
+         `${submitterName} submitted "${letter.ref_no}" for approval.`,
+         letter.id]
+      )
+    }
+
+    // Push notifications
+    await sendPushToUsers(adminIds, {
+      title: '📄 Letter Awaiting Approval',
+      body:  `${submitterName} submitted "${letter.ref_no}" for approval.`,
+      url:   '/dashboard/office/letters',
+    })
+  } catch (e) { console.error('notifyAdmins error:', e.message) }
+}
 
 // GET /api/letters
 router.get('/', auth, ALLOWED, async (req, res) => {
@@ -55,7 +85,11 @@ router.post('/', auth, ALLOWED, async (req, res) => {
       show_sign,
       show_stamp,
     ])
-    res.status(201).json({ letter: result.rows[0] })
+    const saved = result.rows[0]
+    if (saved.status === 'pending') {
+      notifyAdminsLetterPending(saved, req.user.name || req.user.email || 'A team member')
+    }
+    res.status(201).json({ letter: saved })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
@@ -88,7 +122,11 @@ router.put('/:id', auth, ALLOWED, async (req, res) => {
       status,
       req.params.id,
     ])
-    res.json({ letter: result.rows[0] })
+    const saved = result.rows[0]
+    if (saved.status === 'pending') {
+      notifyAdminsLetterPending(saved, req.user.name || req.user.email || 'A team member')
+    }
+    res.json({ letter: saved })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
