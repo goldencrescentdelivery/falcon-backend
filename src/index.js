@@ -86,6 +86,7 @@ app.use('/api/petty-cash',  require('./routes/petty-cash'))
 app.use('/api/office',         require('./routes/office'))
 app.use('/api/letters',        require('./routes/letters'))
 app.use('/api/notifications',  require('./routes/notifications'))
+app.use('/api/tasks',          require('./routes/tasks'))
 
 // ── Health check ───────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status:'ok', ts:new Date().toISOString() }))
@@ -240,6 +241,26 @@ async function autoMigrate() {
     `)
     await query(`CREATE INDEX IF NOT EXISTS idx_letters_created ON office_letters(created_at DESC)`)
   } catch(e) { console.warn('migrate office_letters:', e.message) }
+
+  // tasks table
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title       TEXT NOT NULL,
+        description TEXT,
+        assigned_to UUID REFERENCES users(id) ON DELETE SET NULL,
+        assigned_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        deadline    DATE NOT NULL,
+        priority    TEXT DEFAULT 'normal',
+        status      TEXT DEFAULT 'pending',
+        created_at  TIMESTAMPTZ DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    await query(`CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to)`)
+    await query(`CREATE INDEX IF NOT EXISTS idx_tasks_status   ON tasks(status)`)
+  } catch(e) { console.warn('migrate tasks:', e.message) }
 
   // vehicle_handovers photo columns + expiry
   try {

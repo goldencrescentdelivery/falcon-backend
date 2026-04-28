@@ -79,6 +79,19 @@ router.get('/alerts', auth, async (req, res) => {
         (SELECT COUNT(*) FROM vehicles  WHERE status IN ('grounded','maintenance'))::int AS fleet_issues
     `)
     const { expiring_docs, pending_leaves, sim_issues, fleet_issues } = result.rows[0]
+
+    // Pending tasks for current user (or all tasks if admin)
+    let pending_tasks = 0
+    try {
+      const taskRes = await query(
+        `SELECT COUNT(*)::int AS c FROM tasks
+         WHERE ($1 = 'admin' OR assigned_to::text = $2::text)
+           AND status != 'completed'`,
+        [req.user.role, String(req.user.id)]
+      )
+      pending_tasks = taskRes.rows[0].c || 0
+    } catch { /* tasks table may not exist yet */ }
+
     res.json({
       employees: expiring_docs,
       leaves:    pending_leaves,
@@ -86,6 +99,7 @@ router.get('/alerts', auth, async (req, res) => {
       fleet:     fleet_issues,
       hr:        expiring_docs + pending_leaves,
       poc:       fleet_issues + sim_issues + pending_leaves,
+      tasks:     pending_tasks,
     })
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
