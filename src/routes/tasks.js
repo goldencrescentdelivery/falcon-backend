@@ -29,6 +29,7 @@ router.get('/', auth, async (req, res) => {
       ${isAdmin ? '' : 'WHERE t.assigned_to::text = $1'}
       ORDER BY
         CASE t.status WHEN 'completed' THEN 2 ELSE 1 END,
+        t.due_at ASC NULLS LAST,
         t.deadline ASC NULLS LAST,
         t.created_at DESC
     `
@@ -40,16 +41,20 @@ router.get('/', auth, async (req, res) => {
 // POST /api/tasks — admin only, creates task + sends push notification
 router.post('/', auth, requireRole('admin'), async (req, res) => {
   try {
-    const { title, description, assigned_to, deadline, priority } = req.body
-    if (!title || !assigned_to || !deadline)
+    const { title, description, assigned_to, due_at, priority } = req.body
+    if (!title || !assigned_to || !due_at)
       return res.status(400).json({ error: 'Title, assignee, and deadline are required' })
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(deadline))
-      return res.status(400).json({ error: 'Deadline must be YYYY-MM-DD' })
+
+    // due_at is "YYYY-MM-DDTHH:mm" from datetime-local input
+    const dueDate = new Date(due_at)
+    if (isNaN(dueDate.getTime()))
+      return res.status(400).json({ error: 'Invalid deadline date/time' })
+    const deadline = due_at.slice(0, 10) // derive date-only from datetime
 
     const r = await query(
-      `INSERT INTO tasks (title, description, assigned_to, assigned_by, deadline, priority, last_reminder_sent_at)
-       VALUES ($1,$2,$3,$4,$5,$6,NOW()) RETURNING *`,
-      [title, description || null, assigned_to, req.user.id, deadline, priority || 'normal']
+      `INSERT INTO tasks (title, description, assigned_to, assigned_by, deadline, due_at, priority, last_reminder_sent_at)
+       VALUES ($1,$2,$3,$4,$5,$6::timestamptz,$7,NOW()) RETURNING *`,
+      [title, description || null, assigned_to, req.user.id, deadline, due_at, priority || 'normal']
     )
     const task = r.rows[0]
 
@@ -58,14 +63,14 @@ router.post('/', auth, requireRole('admin'), async (req, res) => {
       `INSERT INTO notifications (user_id, title, body, type, ref_id)
        VALUES ($1::uuid,$2,$3,'task',$4::uuid)`,
       [assigned_to, `📋 New Task: ${title}`,
-       `Deadline: ${deadline}${description ? ' — ' + description.slice(0, 80) : ''}`,
+       `Due ${due_at.replace('T', ' ')}${description ? ' — ' + description.slice(0, 80) : ''}`,
        task.id]
     ).catch(e => console.warn('task notif insert:', e.message))
 
     // Push notification
     await sendPushToUsers([assigned_to], {
       title: '📋 New Task Assigned',
-      body:  `${title} — Due ${deadline}`,
+      body:  `${title} — Due ${due_at.replace('T', ' ')}`,
       url:   '/dashboard/tasks',
     }).catch(e => console.warn('task push:', e.message))
 
@@ -76,16 +81,17 @@ router.post('/', auth, requireRole('admin'), async (req, res) => {
 // PUT /api/tasks/:id — admin can edit task details
 router.put('/:id', auth, requireRole('admin'), async (req, res) => {
   try {
-    const { title, description, assigned_to, deadline, priority } = req.body
-    if (!title || !assigned_to || !deadline)
+    const { title, description, assigned_to, due_at, priority } = req.body
+    if (!title || !assigned_to || !due_at)
       return res.status(400).json({ error: 'Title, assignee, and deadline are required' })
 
+    const dueDate = new Date(due_at)
+    const deadline = isNaN(dueDate.getTime()) ? null : due_at.slice(0, 10)
+
     const r = await query(
-      `UPDATE tasks SET title=$1, description=$2, assigned_to=$3, deadline=$4, priority=$5, updated_at=NOW()
-       WHERE id=$6 RETURNING *`,
-      [title, description || null, assigned_to,
-       /^\d{4}-\d{2}-\d{2}$/.test(deadline) ? deadline : null,
-       priority || 'normal', req.params.id]
+      `UPDATE tasks SET title=$1, description=$2, assigned_to=$3, deadline=$4, due_at=$5::timestamptz, priority=$6, updated_at=NOW()
+       WHERE id=$7 RETURNING *`,
+      [title, description || null, assigned_to, deadline, due_at, priority || 'normal', req.params.id]
     )
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' })
     res.json({ task: r.rows[0] })
@@ -96,7 +102,7 @@ router.put('/:id', auth, requireRole('admin'), async (req, res) => {
 router.patch('/:id/status', auth, async (req, res) => {
   try {
     const { status } = req.body
-    if (!['pending', 'in_progress', 'completed'].includes(status))
+    if (!['pending', 'completed'].includes(status))
       return res.status(400).json({ error: 'Invalid status' })
 
     const existing = await query(`SELECT * FROM tasks WHERE id=$1`, [req.params.id])

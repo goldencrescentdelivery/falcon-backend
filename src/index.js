@@ -252,6 +252,7 @@ async function autoMigrate() {
         assigned_to           UUID REFERENCES users(id) ON DELETE SET NULL,
         assigned_by           UUID REFERENCES users(id) ON DELETE SET NULL,
         deadline              DATE NOT NULL,
+        due_at                TIMESTAMPTZ,
         priority              TEXT DEFAULT 'normal',
         status                TEXT DEFAULT 'pending',
         last_reminder_sent_at TIMESTAMPTZ,
@@ -262,6 +263,7 @@ async function autoMigrate() {
     await query(`CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to)`)
     await query(`CREATE INDEX IF NOT EXISTS idx_tasks_status   ON tasks(status)`)
     await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS last_reminder_sent_at TIMESTAMPTZ`)
+    await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ`)
   } catch(e) { console.warn('migrate tasks:', e.message) }
 
   // vehicle_handovers photo columns + expiry
@@ -547,7 +549,7 @@ async function runTaskReminders() {
     const { sendPushToUsers } = require('./routes/notifications')
 
     const result = await q(`
-      SELECT t.id, t.title, t.deadline, t.assigned_to
+      SELECT t.id, t.title, t.deadline, t.due_at, t.assigned_to
       FROM tasks t
       WHERE t.status != 'completed'
         AND t.assigned_to IS NOT NULL
@@ -560,7 +562,9 @@ async function runTaskReminders() {
     for (const task of result.rows) {
       try {
         const uid = String(task.assigned_to)
-        const due = task.deadline?.slice ? task.deadline.slice(0,10) : task.deadline
+        const due = task.due_at
+          ? new Date(task.due_at).toLocaleString('en-AE', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })
+          : (task.deadline?.slice ? task.deadline.slice(0,10) : task.deadline)
 
         await q(
           `INSERT INTO notifications (user_id, title, body, type, ref_id)
