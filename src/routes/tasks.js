@@ -47,8 +47,8 @@ router.post('/', auth, requireRole('admin'), async (req, res) => {
       return res.status(400).json({ error: 'Deadline must be YYYY-MM-DD' })
 
     const r = await query(
-      `INSERT INTO tasks (title, description, assigned_to, assigned_by, deadline, priority)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      `INSERT INTO tasks (title, description, assigned_to, assigned_by, deadline, priority, last_reminder_sent_at)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW()) RETURNING *`,
       [title, description || null, assigned_to, req.user.id, deadline, priority || 'normal']
     )
     const task = r.rows[0]

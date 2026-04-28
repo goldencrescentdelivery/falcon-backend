@@ -246,20 +246,22 @@ async function autoMigrate() {
   try {
     await query(`
       CREATE TABLE IF NOT EXISTS tasks (
-        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        title       TEXT NOT NULL,
-        description TEXT,
-        assigned_to UUID REFERENCES users(id) ON DELETE SET NULL,
-        assigned_by UUID REFERENCES users(id) ON DELETE SET NULL,
-        deadline    DATE NOT NULL,
-        priority    TEXT DEFAULT 'normal',
-        status      TEXT DEFAULT 'pending',
-        created_at  TIMESTAMPTZ DEFAULT NOW(),
-        updated_at  TIMESTAMPTZ DEFAULT NOW()
+        id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title                 TEXT NOT NULL,
+        description           TEXT,
+        assigned_to           UUID REFERENCES users(id) ON DELETE SET NULL,
+        assigned_by           UUID REFERENCES users(id) ON DELETE SET NULL,
+        deadline              DATE NOT NULL,
+        priority              TEXT DEFAULT 'normal',
+        status                TEXT DEFAULT 'pending',
+        last_reminder_sent_at TIMESTAMPTZ,
+        created_at            TIMESTAMPTZ DEFAULT NOW(),
+        updated_at            TIMESTAMPTZ DEFAULT NOW()
       )
     `)
     await query(`CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to)`)
     await query(`CREATE INDEX IF NOT EXISTS idx_tasks_status   ON tasks(status)`)
+    await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS last_reminder_sent_at TIMESTAMPTZ`)
   } catch(e) { console.warn('migrate tasks:', e.message) }
 
   // vehicle_handovers photo columns + expiry
@@ -537,3 +539,50 @@ async function runPhotoCleanup() {
 
 runPhotoCleanup()
 setInterval(runPhotoCleanup, 24*60*60*1000)
+
+// ── Task reminder — runs every hour, sends push every 5 hours ──
+async function runTaskReminders() {
+  try {
+    const { query: q } = require('./db/pool')
+    const { sendPushToUsers } = require('./routes/notifications')
+
+    const result = await q(`
+      SELECT t.id, t.title, t.deadline, t.assigned_to
+      FROM tasks t
+      WHERE t.status != 'completed'
+        AND t.assigned_to IS NOT NULL
+        AND (
+          t.last_reminder_sent_at IS NULL
+          OR t.last_reminder_sent_at < NOW() - INTERVAL '5 hours'
+        )
+    `)
+
+    for (const task of result.rows) {
+      try {
+        const uid = String(task.assigned_to)
+        const due = task.deadline?.slice ? task.deadline.slice(0,10) : task.deadline
+
+        await q(
+          `INSERT INTO notifications (user_id, title, body, type, ref_id)
+           VALUES ($1::uuid, $2, $3, 'task', $4::uuid)`,
+          [uid, `⏰ Task Reminder: ${task.title}`, `Due ${due} — Task still pending`, task.id]
+        )
+
+        await sendPushToUsers([uid], {
+          title: '⏰ Task Reminder',
+          body:  `${task.title} — Due ${due}`,
+          url:   '/dashboard/tasks',
+        }).catch(() => {})
+
+        await q(`UPDATE tasks SET last_reminder_sent_at = NOW() WHERE id = $1`, [task.id])
+      } catch(e) { console.warn(`Reminder failed for task ${task.id}:`, e.message) }
+    }
+
+    if (result.rows.length > 0) console.log(`Task reminders: sent ${result.rows.length}`)
+  } catch(e) {
+    if (!e.message?.includes('does not exist')) console.error('Task reminder error:', e.message)
+  }
+}
+
+runTaskReminders()
+setInterval(runTaskReminders, 60 * 60 * 1000)
