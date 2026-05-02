@@ -503,6 +503,12 @@ autoMigrate().then(async () => {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`GCD API running on port ${PORT}`)
   })
+
+  // Start scheduled jobs only after tables exist
+  runPhotoCleanup()
+  setInterval(runPhotoCleanup, 24 * 60 * 60 * 1000)
+  runTaskReminders()
+  setInterval(runTaskReminders, 60 * 60 * 1000)
 }).catch(e => {
   console.error('Migration failed, starting anyway:', e.message)
   server.listen(PORT, '0.0.0.0', () => {
@@ -538,9 +544,6 @@ async function runPhotoCleanup() {
     console.log(`Cleanup: removed photos from ${expired.rows.length} handovers`)
   } catch(e) { console.error('Cleanup error:', e.message) }
 }
-
-runPhotoCleanup()
-setInterval(runPhotoCleanup, 24*60*60*1000)
 
 // ── Task reminder — runs every hour, sends push every 5 hours ──
 async function runTaskReminders() {
@@ -588,5 +591,3 @@ async function runTaskReminders() {
   }
 }
 
-runTaskReminders()
-setInterval(runTaskReminders, 60 * 60 * 1000)

@@ -1,5 +1,6 @@
 const router  = require('express').Router()
 const { query } = require('../db/pool')
+const { withTransaction } = require('../lib/transaction')
 const { auth, requireRole } = require('../middleware/auth')
 const V = require('../middleware/validate')
 const { sendPushToUsers } = require('./notifications')
@@ -164,24 +165,30 @@ router.patch('/:id/manager', auth, requireRole('admin','general_manager'),
     if (check.rows[0].hr_status !== 'approved')
       throw new AppError('Manager must approve before admin can act', 400, 'INVALID_STAGE')
 
-    const result = await query(`
-      UPDATE leaves SET
-        mgr_status = $1,
-        mgr_id     = $2,
-        status     = $1,
-        updated_at = NOW()
-      WHERE id=$3 RETURNING *
-    `, [status, req.user.id, req.params.id])
+    const leave = await withTransaction(async (client) => {
+      const result = await client.query(`
+        UPDATE leaves SET
+          mgr_status = $1,
+          mgr_id     = $2,
+          status     = $1,
+          updated_at = NOW()
+        WHERE id=$3 RETURNING *
+      `, [status, req.user.id, req.params.id])
 
-    if (!result.rows[0]) throw new AppError('Leave not found', 404, 'NOT_FOUND')
+      if (!result.rows[0]) throw new AppError('Leave not found', 404, 'NOT_FOUND')
 
-    const leave = result.rows[0]
-    if (status === 'approved' && leave.type === 'Annual' && leave.days > 0) {
-      await query(
-        `UPDATE employees SET annual_leave_balance = GREATEST(0, annual_leave_balance - $1) WHERE id = $2`,
-        [leave.days, leave.emp_id]
-      ).catch(e => console.error('Leave balance update error:', e.message))
-    }
+      const l = result.rows[0]
+      // Deduct balance atomically — if this fails the status update rolls back too
+      if (status === 'approved' && l.type === 'Annual' && l.days > 0) {
+        await client.query(
+          `UPDATE employees SET annual_leave_balance = GREATEST(0, annual_leave_balance - $1) WHERE id = $2`,
+          [l.days, l.emp_id]
+        )
+      }
+      return l
+    })
+
+    if (!leave) throw new AppError('Leave not found', 404, 'NOT_FOUND')
 
     req.audit('FINAL_DECISION', 'leave', req.params.id,
       { mgr_status: 'pending' }, { mgr_status: status, decided_by: req.user.id })

@@ -8,8 +8,14 @@ const { payrollQueue } = require('../lib/queue')
 // GET /api/payroll?month=2024-12&emp_id=
 router.get('/', auth, async (req, res) => {
   try {
-    const month  = req.query.month || new Date().toISOString().slice(0, 7)
-    const empId  = req.user.role === 'driver' ? req.user.emp_id : req.query.emp_id
+    const month = req.query.month || new Date().toISOString().slice(0, 7)
+
+    // Drivers are scoped to their own emp_id. If emp_id is null they have no
+    // payroll record — return empty rather than leaking the entire list.
+    if (req.user.role === 'driver') {
+      if (!req.user.emp_id) return res.json({ payroll: [], month })
+    }
+    const empId = req.user.role === 'driver' ? req.user.emp_id : req.query.emp_id
 
     let sql = `
       SELECT
@@ -29,18 +35,34 @@ router.get('/', auth, async (req, res) => {
     sql += ' GROUP BY e.id, e.name, e.role, e.dept, e.avatar, e.salary, e.hourly_rate, e.station_code, e.project_type, e.per_shipment_rate, e.performance_bonus, p.status, p.paid_on, p.net_pay, p.id ORDER BY e.name'
 
     const result = await query(sql, vals)
+    if (!result.rows.length) return res.json({ payroll: [], month })
 
-    // Attach deduction line-items for each employee
-    const rows = await Promise.all(result.rows.map(async (emp) => {
-      const deductions = await query(
-        `SELECT * FROM salary_deductions WHERE emp_id=$1 AND month=$2 ORDER BY created_at`,
-        [emp.id, month]
-      )
-      const bonuses = await query(
-        `SELECT * FROM salary_bonuses WHERE emp_id=$1 AND month=$2 ORDER BY created_at`,
-        [emp.id, month]
-      )
-      return { ...emp, deductions: deductions.rows, bonuses: bonuses.rows }
+    // Batch-fetch deductions and bonuses in 2 queries instead of 2N
+    const empIds = result.rows.map(r => r.id)
+    const [deductionRows, bonusRows] = await Promise.all([
+      query(
+        `SELECT * FROM salary_deductions WHERE emp_id = ANY($1::uuid[]) AND month=$2 ORDER BY created_at`,
+        [empIds, month]
+      ),
+      query(
+        `SELECT * FROM salary_bonuses WHERE emp_id = ANY($1::uuid[]) AND month=$2 ORDER BY created_at`,
+        [empIds, month]
+      ),
+    ])
+
+    const deductionMap = {}
+    const bonusMap     = {}
+    for (const d of deductionRows.rows) {
+      ;(deductionMap[d.emp_id] ||= []).push(d)
+    }
+    for (const b of bonusRows.rows) {
+      ;(bonusMap[b.emp_id] ||= []).push(b)
+    }
+
+    const rows = result.rows.map(emp => ({
+      ...emp,
+      deductions: deductionMap[emp.id] || [],
+      bonuses:    bonusMap[emp.id]     || [],
     }))
 
     res.json({ payroll: rows, month })
@@ -103,6 +125,8 @@ router.post('/bonuses', auth, V.validatePayrollBonus, requireRole('admin','manag
 router.post('/mark-paid', auth, requireRole('admin','accountant'), async (req, res) => {
   try {
     const { emp_id, month } = req.body
+    if (!emp_id || !month) return res.status(400).json({ error: 'emp_id and month required' })
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month must be YYYY-MM' })
 
     // If Redis/BullMQ is available, enqueue and return immediately
     if (payrollQueue) {

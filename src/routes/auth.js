@@ -165,7 +165,7 @@ router.post('/users', verifyToken, role('admin','manager','general_manager'), as
       INSERT INTO users (email, password_hash, name, role, manager_type, emp_id, station_code, status)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
       RETURNING id, email, name, role, manager_type, emp_id, station_code, status
-    `, [email, hash, name, rl, rl==='general_manager'?manager_type:null, emp_id, station_code, status])
+    `, [email, hash, name, rl, manager_type, emp_id, station_code, status])
 
     res.status(201).json({ user: r.rows[0] })
   } catch(e) {
@@ -279,8 +279,9 @@ router.post('/refresh', async (req, res) => {
     )
 
     if (!stored.rows[0]) {
-      // Token not in DB — possible reuse attack: revoke entire family
-      await query(`UPDATE refresh_tokens SET revoked=true WHERE family=$1`, [stored.rows[0]?.family])
+      // Token not in DB — possible reuse attack. We can't identify the family
+      // from a hash that doesn't exist, so revoke ALL tokens for this user.
+      await query(`UPDATE refresh_tokens SET revoked=true WHERE user_id=$1`, [decoded.id])
       res.clearCookie('access_token')
       res.clearCookie('refresh_token', { path: '/api/auth' })
       return res.status(401).json({ error: 'Refresh token reuse detected' })
