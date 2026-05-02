@@ -220,25 +220,25 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
     const handover = result.rows[0]
 
     // Upload photos if available
-    let photoUrls = [], uploadError = null
+    let photoUrls = [], uploadError = null, finalHandover = handover
     if (req.files?.length) {
-      const result = await uploadPhotos(req.files, handover.id)
-      photoUrls  = result.urls
-      uploadError = result.error
+      const uploadResult = await uploadPhotos(req.files, handover.id)
+      photoUrls   = uploadResult.urls
+      uploadError = uploadResult.error
       if (photoUrls.filter(Boolean).length > 0) {
-        await query(`
-          UPDATE vehicle_handovers SET photo_1=$1,photo_2=$2,photo_3=$3,photo_4=$4 WHERE id=$5
+        const updated = await query(`
+          UPDATE vehicle_handovers SET photo_1=$1,photo_2=$2,photo_3=$3,photo_4=$4 WHERE id=$5 RETURNING *
         `, [photoUrls[0]||null, photoUrls[1]||null, photoUrls[2]||null, photoUrls[3]||null, handover.id])
+        finalHandover = updated.rows[0]
       }
     }
 
-    const final = await query('SELECT * FROM vehicle_handovers WHERE id=$1', [handover.id])
-    req.io?.emit('handover:created', final.rows[0])
+    req.io?.emit('handover:created', finalHandover)
     const photosUploaded = photoUrls.filter(Boolean).length
     const photosWarning = req.files?.length && photosUploaded === 0
       ? `Photos could not be saved: ${uploadError || 'unknown error'}`
       : null
-    res.status(201).json({ handover: final.rows[0], photos_uploaded: photosUploaded, photos_warning: photosWarning })
+    res.status(201).json({ handover: finalHandover, photos_uploaded: photosUploaded, photos_warning: photosWarning })
   } catch (err) {
     console.error('POST /handovers:', err.message)
     if (err.message.includes('foreign key')) return res.status(400).json({ error: 'Invalid vehicle or employee ID' })

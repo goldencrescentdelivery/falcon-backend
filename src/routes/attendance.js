@@ -92,12 +92,19 @@ router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc'
       return res.status(400).json({ error: 'Maximum 100 records per bulk request' })
 
     const results = []
+    // Batch-fetch all employee data in one query instead of one per record
+    const validEmpIds = [...new Set(records.filter(r => r.emp_id && r.status).map(r => r.emp_id))]
+    const empRows = validEmpIds.length
+      ? await query('SELECT id, hourly_rate, station_code FROM employees WHERE id = ANY($1::text[])', [validEmpIds])
+      : { rows: [] }
+    const empMap = {}
+    for (const e of empRows.rows) empMap[e.id] = e
+
     for (const rec of records) {
       const { emp_id, date, status, cycle, cycle_hours, is_rescue, rescue_hours, note, pay_type, daily_rate, worker_type } = rec
       if (!emp_id || !status) continue
 
-      const empRes  = await query('SELECT hourly_rate, station_code FROM employees WHERE id=$1', [emp_id])
-      const emp     = empRes.rows[0]
+      const emp     = empMap[emp_id]
       const station = emp?.station_code || 'DDB7'
 
       let earnings = null
@@ -190,6 +197,9 @@ router.delete('/:id', auth, requireRole('admin','manager','general_manager','poc
 router.get('/summary', auth, requireRole('admin','manager','general_manager','accountant'), async (req, res) => {
   try {
     const month = req.query.month || new Date().toISOString().slice(0,7)
+    const [y, mo] = month.split('-').map(Number)
+    const monthStart = `${month}-01`
+    const monthEnd   = new Date(y, mo, 1).toISOString().slice(0, 10)
     const result = await query(`
       SELECT e.id, e.name, e.station_code, e.hourly_rate,
         COUNT(*) FILTER (WHERE a.status='present') AS present_days,
@@ -198,9 +208,9 @@ router.get('/summary', auth, requireRole('admin','manager','general_manager','ac
         COALESCE(SUM(a.earnings),0)                AS total_earnings,
         COALESCE(SUM(a.cycle_hours),0)             AS total_hours
       FROM employees e
-      LEFT JOIN attendance a ON e.id=a.emp_id AND TO_CHAR(a.date,'YYYY-MM')=$1
+      LEFT JOIN attendance a ON e.id=a.emp_id AND a.date >= $1 AND a.date < $2
       WHERE e.status!='inactive'
-      GROUP BY e.id,e.name,e.station_code,e.hourly_rate ORDER BY e.name`, [month])
+      GROUP BY e.id,e.name,e.station_code,e.hourly_rate ORDER BY e.name`, [monthStart, monthEnd])
     res.json({ summary: result.rows, month })
   } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })
@@ -209,7 +219,10 @@ router.get('/earnings', auth, async (req, res) => {
   try {
     const empId = req.user.role==='driver' ? req.user.emp_id : req.query.emp_id
     const month = req.query.month || new Date().toISOString().slice(0,7)
-    const result = await query(`SELECT a.* FROM attendance a WHERE a.emp_id=$1 AND TO_CHAR(a.date,'YYYY-MM')=$2 ORDER BY a.date`, [empId, month])
+    const [y, mo] = month.split('-').map(Number)
+    const monthStart = `${month}-01`
+    const monthEnd   = new Date(y, mo, 1).toISOString().slice(0, 10)
+    const result = await query(`SELECT a.* FROM attendance a WHERE a.emp_id=$1 AND a.date >= $2 AND a.date < $3 ORDER BY a.date`, [empId, monthStart, monthEnd])
     const totEarnings = result.rows.reduce((s,r)=>s+parseFloat(r.earnings||0),0)
     const totHours    = result.rows.reduce((s,r)=>s+parseFloat(r.cycle_hours||0),0)
     res.json({ records: result.rows, total_hours: totHours, total_earnings: totEarnings, month })

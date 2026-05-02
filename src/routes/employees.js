@@ -158,16 +158,14 @@ router.post('/:id/assign-work-number', auth, requireRole('admin','manager','gene
         return res.json({ conflict: true, conflictEmpId: prev?.id, conflictEmpName: prev?.name })
       }
       // Forced: strip number from previous employee & log removal
-      const prevRes = await query(`SELECT id, name FROM employees WHERE id=$1`, [sim.emp_id])
-      const prev = prevRes.rows[0]
-      await query(`UPDATE employees SET work_number=NULL WHERE id=$1`, [sim.emp_id])
+      const prevCleared = await query(`UPDATE employees SET work_number=NULL WHERE id=$1 RETURNING *`, [sim.emp_id])
+      const prev = prevCleared.rows[0]
       await query(
         `INSERT INTO work_number_history (emp_id,emp_name,phone_number,sim_id,action,prev_emp_id,prev_emp_name,performed_by)
          VALUES ($1,$2,$3,$4,'removed',$5,$6,$7)`,
         [prev?.id, prev?.name, phone_number, sim.id, emp.id, emp.name, req.user.id]
       )
-      const prevUpdated = await query(`SELECT * FROM employees WHERE id=$1`, [sim.emp_id])
-      if (prevUpdated.rows[0]) req.io?.emit('employee:updated', prevUpdated.rows[0])
+      if (prev) req.io?.emit('employee:updated', prev)
     }
 
     // 4. Release this employee's old SIM if different
@@ -182,21 +180,17 @@ router.post('/:id/assign-work-number', auth, requireRole('admin','manager','gene
       )
     }
 
-    // 5. Assign
+    // 5. Assign — run all three writes in parallel
     const action = (sim.emp_id && sim.emp_id !== empId) ? 'reassigned' : 'assigned'
-    await query(`UPDATE employees SET work_number=$1 WHERE id=$2`, [phone_number, empId])
-    await query(
-      `UPDATE sim_cards SET emp_id=$1, status='assigned', assigned_at=NOW(), assigned_by=$2 WHERE id=$3`,
-      [empId, req.user.id, sim.id]
-    )
-    await query(
-      `INSERT INTO work_number_history (emp_id,emp_name,phone_number,sim_id,action,performed_by) VALUES ($1,$2,$3,$4,$5,$6)`,
-      [emp.id, emp.name, phone_number, sim.id, action, req.user.id]
-    )
-
-    const updated = await query(`SELECT * FROM employees WHERE id=$1`, [empId])
-    req.io?.emit('employee:updated', updated.rows[0])
-    res.json({ ok: true, employee: updated.rows[0] })
+    const [empUpdated] = await Promise.all([
+      query(`UPDATE employees SET work_number=$1 WHERE id=$2 RETURNING *`, [phone_number, empId]),
+      query(`UPDATE sim_cards SET emp_id=$1, status='assigned', assigned_at=NOW(), assigned_by=$2 WHERE id=$3`,
+        [empId, req.user.id, sim.id]),
+      query(`INSERT INTO work_number_history (emp_id,emp_name,phone_number,sim_id,action,performed_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [emp.id, emp.name, phone_number, sim.id, action, req.user.id]),
+    ])
+    req.io?.emit('employee:updated', empUpdated.rows[0])
+    res.json({ ok: true, employee: empUpdated.rows[0] })
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
@@ -208,18 +202,14 @@ router.delete('/:id/work-number', auth, requireRole('admin','manager','general_m
     const emp = empRes.rows[0]
     if (!emp.work_number) return res.json({ ok: true })
 
-    await query(
-      `UPDATE sim_cards SET emp_id=NULL, status='available', assigned_at=NULL, assigned_by=NULL WHERE phone_number=$1`,
-      [emp.work_number]
-    )
-    await query(
-      `INSERT INTO work_number_history (emp_id,emp_name,phone_number,action,performed_by) VALUES ($1,$2,$3,'removed',$4)`,
-      [emp.id, emp.name, emp.work_number, req.user.id]
-    )
-    await query(`UPDATE employees SET work_number=NULL WHERE id=$1`, [req.params.id])
-
-    const updated = await query(`SELECT * FROM employees WHERE id=$1`, [req.params.id])
-    req.io?.emit('employee:updated', updated.rows[0])
+    const [empCleared] = await Promise.all([
+      query(`UPDATE employees SET work_number=NULL WHERE id=$1 RETURNING *`, [req.params.id]),
+      query(`UPDATE sim_cards SET emp_id=NULL, status='available', assigned_at=NULL, assigned_by=NULL WHERE phone_number=$1`,
+        [emp.work_number]),
+      query(`INSERT INTO work_number_history (emp_id,emp_name,phone_number,action,performed_by) VALUES ($1,$2,$3,'removed',$4)`,
+        [emp.id, emp.name, emp.work_number, req.user.id]),
+    ])
+    req.io?.emit('employee:updated', empCleared.rows[0])
     res.json({ ok: true })
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })

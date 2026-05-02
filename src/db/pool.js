@@ -20,7 +20,7 @@ function createPool() {
       password: process.env.DB_PASSWORD,
       ssl:      { rejectUnauthorized: false },
       max:      10,
-      min:      0,
+      min:      2,
       idleTimeoutMillis:     10000,
       connectionTimeoutMillis: 15000,
     })
