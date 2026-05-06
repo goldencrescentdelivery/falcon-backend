@@ -83,7 +83,7 @@ router.get('/:id', auth, ALLOWED, async (req, res) => {
 // POST /api/letters
 router.post('/', auth, ALLOWED, async (req, res) => {
   try {
-    const { date, to_name, subject, greeting, body, show_sign = true, show_stamp = true } = req.body
+    const { date, to_name, subject, greeting, body, show_sign = true, show_stamp = true, signer_name, signer_title, signature_data } = req.body
     if (!body?.trim()) return res.status(400).json({ error: 'body is required' })
 
     const isAdmin = req.user.role === 'admin'
@@ -98,8 +98,8 @@ router.post('/', auth, ALLOWED, async (req, res) => {
 
     const result = await query(`
       INSERT INTO office_letters
-        (ref_no, date, to_name, subject, greeting, body, created_by, created_by_name, status, show_sign, show_stamp)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        (ref_no, date, to_name, subject, greeting, body, created_by, created_by_name, status, show_sign, show_stamp, signer_name, signer_title, signature_data)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
       RETURNING *
     `, [
       ref_no,
@@ -113,6 +113,9 @@ router.post('/', auth, ALLOWED, async (req, res) => {
       status,
       show_sign,
       show_stamp,
+      signer_name || null,
+      signer_title || null,
+      signature_data || null,
     ])
     const saved = result.rows[0]
     if (saved.status === 'pending') {
@@ -125,7 +128,7 @@ router.post('/', auth, ALLOWED, async (req, res) => {
 // PUT /api/letters/:id
 router.put('/:id', auth, ALLOWED, async (req, res) => {
   try {
-    const { date, to_name, subject, greeting, body, show_sign = true, show_stamp = true } = req.body
+    const { date, to_name, subject, greeting, body, show_sign = true, show_stamp = true, signer_name, signer_title, signature_data } = req.body
     if (!body?.trim()) return res.status(400).json({ error: 'body is required' })
 
     const existing = await query(`SELECT created_by FROM office_letters WHERE id=$1`, [req.params.id])
@@ -138,8 +141,9 @@ router.put('/:id', auth, ALLOWED, async (req, res) => {
 
     const result = await query(`
       UPDATE office_letters
-      SET date=$1, to_name=$2, subject=$3, greeting=$4, body=$5, show_sign=$6, show_stamp=$7, status=$8
-      WHERE id=$9 RETURNING *
+      SET date=$1, to_name=$2, subject=$3, greeting=$4, body=$5, show_sign=$6, show_stamp=$7, status=$8,
+          signer_name=$9, signer_title=$10, signature_data=$11
+      WHERE id=$12 RETURNING *
     `, [
       date || new Date().toISOString().split('T')[0],
       to_name  || null,
@@ -149,6 +153,9 @@ router.put('/:id', auth, ALLOWED, async (req, res) => {
       show_sign,
       show_stamp,
       status,
+      signer_name || null,
+      signer_title || null,
+      signature_data || null,
       req.params.id,
     ])
     const saved = result.rows[0]

@@ -242,6 +242,16 @@ async function autoMigrate() {
     await query(`CREATE INDEX IF NOT EXISTS idx_letters_created ON office_letters(created_at DESC)`)
   } catch(e) { console.warn('migrate office_letters:', e.message) }
 
+  // office_letters — signer fields (migrate19)
+  try {
+    await query(`ALTER TABLE office_letters ADD COLUMN IF NOT EXISTS signer_name     TEXT`)
+    await query(`ALTER TABLE office_letters ADD COLUMN IF NOT EXISTS signer_title    TEXT`)
+    await query(`ALTER TABLE office_letters ADD COLUMN IF NOT EXISTS signature_data  TEXT`)
+    await query(`ALTER TABLE office_letters ADD COLUMN IF NOT EXISTS show_sign       BOOLEAN DEFAULT TRUE`)
+    await query(`ALTER TABLE office_letters ADD COLUMN IF NOT EXISTS show_stamp      BOOLEAN DEFAULT TRUE`)
+    await query(`ALTER TABLE office_letters ADD COLUMN IF NOT EXISTS status          TEXT DEFAULT 'approved'`)
+  } catch(e) { console.warn('migrate office_letters signer:', e.message) }
+
   // tasks table
   try {
     await query(`
