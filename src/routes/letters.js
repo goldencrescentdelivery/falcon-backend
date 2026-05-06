@@ -34,6 +34,35 @@ async function notifyAdminsLetterPending(letter, submitterName) {
   } catch (e) { console.error('notifyAdmins error:', e.message) }
 }
 
+// GET /api/letters/verify/:id
+// Public endpoint used by the QR code printed on official letters.
+router.get('/verify/:id', async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT id, ref_no, date, to_name, subject, status, created_by_name, created_at
+      FROM office_letters
+      WHERE id=$1
+    `, [req.params.id])
+
+    const letter = result.rows[0]
+    if (!letter) {
+      return res.status(404).json({
+        valid: false,
+        status: 'not_found',
+        message: 'Document not found',
+      })
+    }
+
+    const valid = letter.status === 'approved'
+    res.json({
+      valid,
+      status: letter.status,
+      message: valid ? 'Document is valid' : 'Document is not approved',
+      letter,
+    })
+  } catch (err) { res.status(500).json({ valid: false, error: err.message }) }
+})
+
 // GET /api/letters
 router.get('/', auth, ALLOWED, async (req, res) => {
   try {
