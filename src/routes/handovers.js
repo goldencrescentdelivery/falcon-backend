@@ -292,28 +292,36 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
       }
     }
 
+    // Broadcast to all so every connected driver refreshes their pending list
     req.io?.emit('handover:created', finalHandover)
 
-    // Notify Driver B when Driver A submits a return
+    // Notify Driver B specifically when Driver A submits a return
     if (isReturn && receiver_emp_id) {
       try {
         const receiverUser = await query(`SELECT id FROM users WHERE emp_id=$1`, [receiver_emp_id])
+        const plate = veh.rows[0]?.plate || finalHandover.vehicle_id
         if (receiverUser.rows[0]) {
-          const plate = veh.rows[0]?.plate || finalHandover.vehicle_id
-          await sendPushToUsers([receiverUser.rows[0].id], {
+          const ruid = receiverUser.rows[0].id
+          // Targeted socket events — Driver B definitely gets these even if they were already online
+          req.io?.to(`user:${ruid}`).emit('handover:incoming', finalHandover)
+          req.io?.to(`emp:${receiver_emp_id}`).emit('handover:incoming', finalHandover)
+          await query(`INSERT INTO notifications (user_id, title, body, type, ref_id) VALUES ($1,$2,$3,'handover',$4)`,
+            [ruid, 'Vehicle Handover Request',
+             `${req.user.name || 'A driver'} wants to hand over ${plate} to you. Tap to accept.`,
+             finalHandover.id])
+          req.io?.to(`user:${ruid}`).emit('notification:new', {
+            title: 'Vehicle Handover Request',
+            body: `${req.user.name || 'A driver'} wants to hand over ${plate} to you. Tap to accept.`,
+            type: 'handover',
+          })
+          await sendPushToUsers([ruid], {
             title: 'Vehicle Handover Request',
             body: `${req.user.name || 'A driver'} wants to hand over ${plate} to you. Tap to accept.`,
             url: '/driver',
           })
-          await query(`INSERT INTO notifications (user_id, title, body, type, ref_id) VALUES ($1,$2,$3,'handover',$4)`,
-            [receiverUser.rows[0].id, 'Vehicle Handover Request',
-             `${req.user.name || 'A driver'} wants to hand over a vehicle to you.`,
-             finalHandover.id])
-          req.io?.to(`user:${receiverUser.rows[0].id}`).emit('notification:new', {
-            title: 'Vehicle Handover Request',
-            body: `${req.user.name || 'A driver'} wants to hand over a vehicle to you.`,
-            type: 'handover',
-          })
+        } else {
+          // No user account linked — still emit to emp room
+          req.io?.to(`emp:${receiver_emp_id}`).emit('handover:incoming', finalHandover)
         }
       } catch(e) { console.warn('[handovers] notify receiver failed:', e.message) }
     }
