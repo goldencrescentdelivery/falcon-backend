@@ -27,7 +27,14 @@ router.get('/', auth, async (req, res) => {
 router.get('/for-handover', auth, async (req, res) => {
   try {
     const result = await query(
-      `SELECT id, name, station_code FROM employees WHERE status='active' AND role='driver' ORDER BY name`,
+      `SELECT id, name, station_code
+       FROM employees
+       WHERE LOWER(COALESCE(status, '')) = 'active'
+         AND (
+           LOWER(COALESCE(role, '')) = 'driver'
+           OR LOWER(COALESCE(dept, '')) = 'operations'
+         )
+       ORDER BY name`,
       []
     )
     res.json({ employees: result.rows })
