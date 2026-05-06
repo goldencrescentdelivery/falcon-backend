@@ -266,6 +266,15 @@ async function autoMigrate() {
     await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ`)
   } catch(e) { console.warn('migrate tasks:', e.message) }
 
+  // vehicle_handovers — two-actor flow columns (migrate18)
+  try {
+    await query(`ALTER TABLE vehicle_handovers ADD COLUMN IF NOT EXISTS receiver_emp_id TEXT REFERENCES employees(id)`)
+    await query(`ALTER TABLE vehicle_handovers ADD COLUMN IF NOT EXISTS accepted_at     TIMESTAMPTZ`)
+    await query(`ALTER TABLE vehicle_handovers ADD COLUMN IF NOT EXISTS completed_at    TIMESTAMPTZ`)
+    await query(`CREATE INDEX IF NOT EXISTS idx_handovers_receiver ON vehicle_handovers(receiver_emp_id)`)
+  } catch(e) { console.warn('migrate vehicle_handovers two-actor cols:', e.message) }
+
+  // vehicle_handovers — poc_pending status (no schema change needed, just status value)
   // vehicle_handovers photo columns + expiry
   try {
     await query(`ALTER TABLE vehicle_handovers ADD COLUMN IF NOT EXISTS photo_1 TEXT`)

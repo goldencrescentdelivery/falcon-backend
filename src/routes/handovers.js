@@ -1,6 +1,7 @@
 const router  = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
+const { sendPushToUsers } = require('./notifications')
 
 // Try to load multer (optional)
 let multer = null
@@ -99,7 +100,7 @@ async function deletePhotos(photoUrls) {
 // GET /api/handovers
 router.get('/', auth, async (req, res) => {
   try {
-    const { vehicle_id, emp_id, type, limit, station_code } = req.query
+    const { vehicle_id, emp_id, type, limit, station_code, status } = req.query
     let sql = `
       SELECT h.*,
              e.name  AS emp_name,
@@ -123,7 +124,8 @@ router.get('/', auth, async (req, res) => {
       if (vehicle_id)   { vals.push(vehicle_id);   sql += ` AND h.vehicle_id=$${vals.length}` }
       if (station_code) { vals.push(station_code); sql += ` AND h.station_code=$${vals.length}` }
     }
-    if (type) { vals.push(type); sql += ` AND h.type=$${vals.length}` }
+    if (type)   { vals.push(type);   sql += ` AND h.type=$${vals.length}` }
+    if (status) { vals.push(status); sql += ` AND h.status=$${vals.length}` }
     sql += ` ORDER BY h.submitted_at DESC`
     if (limit) sql += ` LIMIT ${parseInt(limit)}`
     const result = await query(sql, vals)
@@ -150,7 +152,7 @@ router.get('/pending', auth, async (req, res) => {
       JOIN vehicles  v ON h.vehicle_id=v.id
       LEFT JOIN employees r ON h.receiver_emp_id=r.id
       WHERE h.receiver_emp_id=$1
-        AND h.status IN ('pending_acceptance','accepted')
+        AND h.status IN ('pending_acceptance','accepted','poc_pending')
       ORDER BY h.submitted_at DESC
     `, [emp_id])
     res.json({ pending: result.rows })
@@ -169,7 +171,7 @@ router.get('/current', auth, async (req, res) => {
       JOIN employees e ON h.emp_id=e.id
       JOIN vehicles  v ON h.vehicle_id=v.id
       WHERE h.type='received'
-        AND h.status='completed'
+        AND h.status IN ('completed','poc_pending')
         AND NOT EXISTS (
           SELECT 1 FROM vehicle_handovers h2
           WHERE h2.vehicle_id=h.vehicle_id AND h2.type='returned'
@@ -217,7 +219,7 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
     const emp_id = req.user.emp_id
     if (!emp_id) return res.status(400).json({ error: 'Your account is not linked to an employee record. Ask admin to set your Employee ID in User Accounts.' })
 
-    const veh = await query('SELECT station_code FROM vehicles WHERE id=$1', [vehicle_id])
+    const veh = await query('SELECT station_code, plate_number FROM vehicles WHERE id=$1', [vehicle_id])
     if (!veh.rows[0]) return res.status(404).json({ error: 'Vehicle not found' })
 
     const isReturn = type === 'returned'
@@ -291,6 +293,31 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
     }
 
     req.io?.emit('handover:created', finalHandover)
+
+    // Notify Driver B when Driver A submits a return
+    if (isReturn && receiver_emp_id) {
+      try {
+        const receiverUser = await query(`SELECT id FROM users WHERE emp_id=$1`, [receiver_emp_id])
+        if (receiverUser.rows[0]) {
+          const plate = veh.rows[0]?.plate_number || finalHandover.vehicle_id
+          await sendPushToUsers([receiverUser.rows[0].id], {
+            title: 'Vehicle Handover Request',
+            body: `${req.user.name || 'A driver'} wants to hand over ${plate} to you. Tap to accept.`,
+            url: '/driver',
+          })
+          await query(`INSERT INTO notifications (user_id, title, body, type, ref_id) VALUES ($1,$2,$3,'handover',$4)`,
+            [receiverUser.rows[0].id, 'Vehicle Handover Request',
+             `${req.user.name || 'A driver'} wants to hand over a vehicle to you.`,
+             finalHandover.id])
+          req.io?.to(`user:${receiverUser.rows[0].id}`).emit('notification:new', {
+            title: 'Vehicle Handover Request',
+            body: `${req.user.name || 'A driver'} wants to hand over a vehicle to you.`,
+            type: 'handover',
+          })
+        }
+      } catch(e) { console.warn('[handovers] notify receiver failed:', e.message) }
+    }
+
     const photosUploaded = photoUrls.filter(Boolean).length
     const photosWarning = !isReturn && req.files?.length && photosUploaded === 0
       ? `Photos could not be saved: ${uploadError || 'unknown error'}`
@@ -355,18 +382,36 @@ router.patch('/:id/complete', auth, upload.array('photos', 4), async (req, res) 
     const photoUrls    = uploadResult.urls
     const uploadError  = uploadResult.error
 
-    // Update the return record to completed with photos
-    const updated = await query(`
-      UPDATE vehicle_handovers
-      SET status='completed', completed_at=NOW(), updated_at=NOW(),
-          photo_1=$1, photo_2=$2, photo_3=$3, photo_4=$4,
-          odometer=COALESCE($5::integer, odometer),
-          fuel_level=COALESCE($6, fuel_level),
-          condition_note=COALESCE($7, condition_note)
-      WHERE id=$8 RETURNING *
-    `, [photoUrls[0]||null, photoUrls[1]||null, photoUrls[2]||null, photoUrls[3]||null,
-        odometer||null, fuel_level||null, condition_note||null,
-        h.id])
+    // Update the return record to poc_pending (awaiting POC verification) with photos
+    let updated
+    try {
+      updated = await query(`
+        UPDATE vehicle_handovers
+        SET status='poc_pending', completed_at=NOW(), updated_at=NOW(),
+            photo_1=$1, photo_2=$2, photo_3=$3, photo_4=$4,
+            odometer=COALESCE($5::integer, odometer),
+            fuel_level=COALESCE($6, fuel_level),
+            condition_note=COALESCE($7, condition_note)
+        WHERE id=$8 RETURNING *
+      `, [photoUrls[0]||null, photoUrls[1]||null, photoUrls[2]||null, photoUrls[3]||null,
+          odometer||null, fuel_level||null, condition_note||null,
+          h.id])
+    } catch(dbErr) {
+      // completed_at column may not exist on older DB — retry without it
+      if (dbErr.message.includes('completed_at')) {
+        updated = await query(`
+          UPDATE vehicle_handovers
+          SET status='poc_pending', updated_at=NOW(),
+              photo_1=$1, photo_2=$2, photo_3=$3, photo_4=$4,
+              odometer=COALESCE($5::integer, odometer),
+              fuel_level=COALESCE($6, fuel_level),
+              condition_note=COALESCE($7, condition_note)
+          WHERE id=$8 RETURNING *
+        `, [photoUrls[0]||null, photoUrls[1]||null, photoUrls[2]||null, photoUrls[3]||null,
+            odometer||null, fuel_level||null, condition_note||null,
+            h.id])
+      } else throw dbErr
+    }
 
     const finalReturn = updated.rows[0]
 
@@ -380,7 +425,7 @@ router.patch('/:id/complete', auth, upload.array('photos', 4), async (req, res) 
           (vehicle_id, emp_id, station_code, type, odometer, fuel_level,
            condition_note, handover_from, status,
            photo_1, photo_2, photo_3, photo_4, photos_expire_at, completed_at)
-        VALUES ($1,$2,$3,'received',$4,$5,$6,$7,'completed',$8,$9,$10,$11,$12,NOW())
+        VALUES ($1,$2,$3,'received',$4,$5,$6,$7,'poc_pending',$8,$9,$10,$11,$12,NOW())
         RETURNING *
       `, [h.vehicle_id, h.receiver_emp_id, h.station_code,
           odometer || h.odometer || null,
@@ -391,10 +436,56 @@ router.patch('/:id/complete', auth, upload.array('photos', 4), async (req, res) 
           photosExpireAt])
       receivedRecord = rx.rows[0]
     } catch(e) {
-      console.warn('[handovers] auto-create received record failed:', e.message)
+      // Retry without completed_at
+      try {
+        const rx2 = await query(`
+          INSERT INTO vehicle_handovers
+            (vehicle_id, emp_id, station_code, type, odometer, fuel_level,
+             condition_note, handover_from, status,
+             photo_1, photo_2, photo_3, photo_4, photos_expire_at)
+          VALUES ($1,$2,$3,'received',$4,$5,$6,$7,'poc_pending',$8,$9,$10,$11,$12)
+          RETURNING *
+        `, [h.vehicle_id, h.receiver_emp_id, h.station_code,
+            odometer || h.odometer || null,
+            fuel_level || h.fuel_level || null,
+            condition_note || null,
+            h.emp_id,
+            photoUrls[0]||null, photoUrls[1]||null, photoUrls[2]||null, photoUrls[3]||null,
+            photosExpireAt])
+        receivedRecord = rx2.rows[0]
+      } catch(e2) {
+        console.warn('[handovers] auto-create received record failed:', e2.message)
+      }
     }
 
     req.io?.emit('handover:completed', { returned: finalReturn, received: receivedRecord })
+
+    // Notify all POCs at this station
+    try {
+      const pocUsers = await query(
+        `SELECT id FROM users WHERE role='poc' AND station_code=$1 AND status='active'`,
+        [h.station_code]
+      )
+      if (pocUsers.rows.length) {
+        const plate = finalReturn.vehicle_plate || h.vehicle_id
+        await sendPushToUsers(pocUsers.rows.map(r => r.id), {
+          title: 'Vehicle Handover — POC Verification Required',
+          body: `${req.user.name || 'Driver B'} completed handover of ${plate}. Tap to approve or reject.`,
+          url: '/dashboard/poc/fleet',
+        })
+        for (const pu of pocUsers.rows) {
+          await query(`INSERT INTO notifications (user_id, title, body, type, ref_id) VALUES ($1,$2,$3,'handover',$4)`,
+            [pu.id, 'Handover Awaiting Verification',
+             `${req.user.name || 'A driver'} completed a vehicle handover. Please verify.`,
+             finalReturn.id])
+          req.io?.to(`user:${pu.id}`).emit('notification:new', {
+            title: 'Handover Awaiting Verification',
+            body: `${req.user.name || 'A driver'} completed a vehicle handover. Please verify.`,
+            type: 'handover',
+          })
+        }
+      }
+    } catch(e) { console.warn('[handovers] notify poc failed:', e.message) }
 
     const photosWarning = photoUrls.filter(Boolean).length === 0
       ? `Photos could not be saved: ${uploadError || 'unknown error'}`
@@ -403,6 +494,114 @@ router.patch('/:id/complete', auth, upload.array('photos', 4), async (req, res) 
     res.json({ handover: finalReturn, received: receivedRecord, photos_warning: photosWarning })
   } catch (err) {
     console.error('PATCH /handovers/:id/complete:', err.message)
+    res.status(500).json({ error: err.message || 'Server error' })
+  }
+})
+
+// PATCH /api/handovers/:id/poc-verify
+// POC approves or rejects a completed handover
+router.patch('/:id/poc-verify', auth, requireRole('admin','manager','general_manager','poc'), async (req, res) => {
+  try {
+    const { action } = req.body // 'approve' | 'reject'
+    if (!action || !['approve','reject'].includes(action))
+      return res.status(400).json({ error: "action must be 'approve' or 'reject'" })
+
+    const rec = await query(`
+      SELECT h.*,
+             e.name  AS emp_name,
+             r.name  AS receiver_name,
+             v.plate AS vehicle_plate
+      FROM vehicle_handovers h
+      JOIN employees e ON h.emp_id=e.id
+      JOIN vehicles  v ON h.vehicle_id=v.id
+      LEFT JOIN employees r ON h.receiver_emp_id=r.id
+      WHERE h.id=$1
+    `, [req.params.id])
+    if (!rec.rows[0]) return res.status(404).json({ error: 'Handover not found' })
+    const h = rec.rows[0]
+
+    if (h.status !== 'poc_pending')
+      return res.status(409).json({ error: `Cannot verify — current status is '${h.status}'` })
+
+    if (action === 'approve') {
+      // Mark both the return record and the matching received record as completed
+      const updated = await query(`
+        UPDATE vehicle_handovers SET status='completed', updated_at=NOW() WHERE id=$1 RETURNING *
+      `, [h.id])
+
+      // Also complete the auto-created received record for Driver B
+      await query(`
+        UPDATE vehicle_handovers
+        SET status='completed', updated_at=NOW()
+        WHERE vehicle_id=$1
+          AND emp_id=$2
+          AND type='received'
+          AND status='poc_pending'
+      `, [h.vehicle_id, h.receiver_emp_id])
+
+      req.io?.emit('handover:poc-approved', updated.rows[0])
+
+      // Notify Driver A (initiator of return)
+      try {
+        const driverAUser = await query(`SELECT id FROM users WHERE emp_id=$1`, [h.emp_id])
+        if (driverAUser.rows[0]) {
+          await sendPushToUsers([driverAUser.rows[0].id], {
+            title: 'Handover Approved',
+            body: `Your handover of ${h.vehicle_plate} has been verified and approved.`,
+            url: '/driver',
+          })
+          await query(`INSERT INTO notifications (user_id, title, body, type, ref_id) VALUES ($1,$2,$3,'handover',$4)`,
+            [driverAUser.rows[0].id, 'Handover Approved',
+             `Your handover of ${h.vehicle_plate} has been approved by POC.`,
+             h.id])
+          req.io?.to(`user:${driverAUser.rows[0].id}`).emit('notification:new', {
+            title: 'Handover Approved',
+            body: `Your handover of ${h.vehicle_plate} has been approved by POC.`,
+            type: 'handover',
+          })
+        }
+      } catch(e) { console.warn('[handovers] notify driver A on approve:', e.message) }
+
+      return res.json({ handover: updated.rows[0], action: 'approved' })
+    }
+
+    // action === 'reject'
+    // Delete Driver B's auto-created received record and revert return to 'rejected'
+    await query(`
+      DELETE FROM vehicle_handovers
+      WHERE vehicle_id=$1 AND emp_id=$2 AND type='received' AND status='poc_pending'
+    `, [h.vehicle_id, h.receiver_emp_id])
+
+    const updated = await query(`
+      UPDATE vehicle_handovers SET status='rejected', updated_at=NOW() WHERE id=$1 RETURNING *
+    `, [h.id])
+
+    req.io?.emit('handover:poc-rejected', updated.rows[0])
+
+    // Notify Driver A that handover was rejected — vehicle is still theirs
+    try {
+      const driverAUser = await query(`SELECT id FROM users WHERE emp_id=$1`, [h.emp_id])
+      if (driverAUser.rows[0]) {
+        await sendPushToUsers([driverAUser.rows[0].id], {
+          title: 'Handover Rejected by POC',
+          body: `Your handover of ${h.vehicle_plate} was rejected. The vehicle remains assigned to you.`,
+          url: '/driver',
+        })
+        await query(`INSERT INTO notifications (user_id, title, body, type, ref_id) VALUES ($1,$2,$3,'handover',$4)`,
+          [driverAUser.rows[0].id, 'Handover Rejected',
+           `Your handover of ${h.vehicle_plate} was rejected by POC. Vehicle is still yours.`,
+           h.id])
+        req.io?.to(`user:${driverAUser.rows[0].id}`).emit('notification:new', {
+          title: 'Handover Rejected',
+          body: `Your handover of ${h.vehicle_plate} was rejected. Vehicle is still yours.`,
+          type: 'handover',
+        })
+      }
+    } catch(e) { console.warn('[handovers] notify driver A on reject:', e.message) }
+
+    res.json({ handover: updated.rows[0], action: 'rejected' })
+  } catch (err) {
+    console.error('PATCH /handovers/:id/poc-verify:', err.message)
     res.status(500).json({ error: err.message || 'Server error' })
   }
 })
