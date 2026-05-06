@@ -219,7 +219,7 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
     const emp_id = req.user.emp_id
     if (!emp_id) return res.status(400).json({ error: 'Your account is not linked to an employee record. Ask admin to set your Employee ID in User Accounts.' })
 
-    const veh = await query('SELECT station_code, plate_number FROM vehicles WHERE id=$1', [vehicle_id])
+    const veh = await query('SELECT station_code, plate FROM vehicles WHERE id=$1', [vehicle_id])
     if (!veh.rows[0]) return res.status(404).json({ error: 'Vehicle not found' })
 
     const isReturn = type === 'returned'
@@ -299,7 +299,7 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
       try {
         const receiverUser = await query(`SELECT id FROM users WHERE emp_id=$1`, [receiver_emp_id])
         if (receiverUser.rows[0]) {
-          const plate = veh.rows[0]?.plate_number || finalHandover.vehicle_id
+          const plate = veh.rows[0]?.plate || finalHandover.vehicle_id
           await sendPushToUsers([receiverUser.rows[0].id], {
             title: 'Vehicle Handover Request',
             body: `${req.user.name || 'A driver'} wants to hand over ${plate} to you. Tap to accept.`,
