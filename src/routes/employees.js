@@ -23,6 +23,17 @@ router.get('/', auth, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
+// GET /api/employees/for-handover — all active drivers, visible to any authenticated user
+router.get('/for-handover', auth, async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT id, name, station_code FROM employees WHERE status='active' ORDER BY name`,
+      []
+    )
+    res.json({ employees: result.rows })
+  } catch (err) { res.status(500).json({ error: 'Server error' }) }
+})
+
 // GET /api/employees/work-number/history — full assignment log (must be before /:id)
 router.get('/work-number/history', auth, requireRole('admin','manager','general_manager','hr'), async (req, res) => {
   try {
