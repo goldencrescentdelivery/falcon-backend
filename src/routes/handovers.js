@@ -236,6 +236,21 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
     if (isReturn && receiver_emp_id === emp_id) {
       return res.status(400).json({ error: 'Cannot select yourself as the receiving driver' })
     }
+    // Driver B must not already have a vehicle
+    if (isReturn && receiver_emp_id) {
+      const [activeHO, todayAsgn, receiverEmp] = await Promise.all([
+        query(`SELECT v.plate FROM vehicle_handovers h JOIN vehicles v ON h.vehicle_id=v.id
+               WHERE h.receiver_emp_id=$1 AND h.status='accepted' LIMIT 1`, [receiver_emp_id]),
+        query(`SELECT v.plate FROM vehicle_assignments va JOIN vehicles v ON va.vehicle_id=v.id
+               WHERE va.emp_id=$1 AND va.date=CURRENT_DATE LIMIT 1`, [receiver_emp_id]),
+        query(`SELECT name FROM employees WHERE id=$1`, [receiver_emp_id]),
+      ])
+      const plate = activeHO.rows[0]?.plate || todayAsgn.rows[0]?.plate
+      if (plate) {
+        const name = receiverEmp.rows[0]?.name || 'That driver'
+        return res.status(409).json({ error: `${name} already has vehicle ${plate}. They must return it before you can hand over to them.` })
+      }
+    }
     // Receiving: 4 photos required
     if (!isReturn && (!req.files || req.files.length < 4)) {
       return res.status(400).json({ error: 'Exactly 4 photos are required when receiving a vehicle' })
