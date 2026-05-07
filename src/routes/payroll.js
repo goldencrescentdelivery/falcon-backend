@@ -41,11 +41,11 @@ router.get('/', auth, async (req, res) => {
     const empIds = result.rows.map(r => r.id)
     const [deductionRows, bonusRows] = await Promise.all([
       query(
-        `SELECT * FROM salary_deductions WHERE emp_id = ANY($1::uuid[]) AND month=$2 ORDER BY created_at`,
+        `SELECT * FROM salary_deductions WHERE emp_id = ANY($1::text[]) AND month=$2 ORDER BY created_at`,
         [empIds, month]
       ),
       query(
-        `SELECT * FROM salary_bonuses WHERE emp_id = ANY($1::uuid[]) AND month=$2 ORDER BY created_at`,
+        `SELECT * FROM salary_bonuses WHERE emp_id = ANY($1::text[]) AND month=$2 ORDER BY created_at`,
         [empIds, month]
       ),
     ])
