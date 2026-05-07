@@ -37,9 +37,14 @@ router.get('/', auth, async (req, res) => {
     const result = await query(sql, vals)
     if (!result.rows.length) return res.json({ payroll: [], month })
 
-    // Batch-fetch deductions and bonuses in 2 queries instead of 2N
+    // Month date range for attendance
+    const [y, mo]    = month.split('-').map(Number)
+    const monthStart = `${month}-01`
+    const monthEnd   = new Date(y, mo, 1).toISOString().slice(0, 10)
+
+    // Batch-fetch deductions, bonuses, and attendance in 3 queries
     const empIds = result.rows.map(r => r.id)
-    const [deductionRows, bonusRows] = await Promise.all([
+    const [deductionRows, bonusRows, attRows] = await Promise.all([
       query(
         `SELECT * FROM salary_deductions WHERE emp_id = ANY($1::text[]) AND month=$2 ORDER BY created_at`,
         [empIds, month]
@@ -48,21 +53,40 @@ router.get('/', auth, async (req, res) => {
         `SELECT * FROM salary_bonuses WHERE emp_id = ANY($1::text[]) AND month=$2 ORDER BY created_at`,
         [empIds, month]
       ),
+      query(
+        `SELECT emp_id,
+                COALESCE(SUM(cycle_hours),0)                          AS total_hours,
+                COALESCE(SUM(earnings),0)                             AS total_earnings,
+                COUNT(*) FILTER (WHERE status='present')              AS present_days,
+                COUNT(*) FILTER (WHERE status='absent')               AS absent_days
+         FROM attendance
+         WHERE emp_id = ANY($1::text[]) AND date >= $2 AND date < $3
+         GROUP BY emp_id`,
+        [empIds, monthStart, monthEnd]
+      ),
     ])
 
     const deductionMap = {}
     const bonusMap     = {}
+    const attMap       = {}
     for (const d of deductionRows.rows) {
       ;(deductionMap[d.emp_id] ||= []).push(d)
     }
     for (const b of bonusRows.rows) {
       ;(bonusMap[b.emp_id] ||= []).push(b)
     }
+    for (const a of attRows.rows) {
+      attMap[a.emp_id] = a
+    }
 
     const rows = result.rows.map(emp => ({
       ...emp,
-      deductions: deductionMap[emp.id] || [],
-      bonuses:    bonusMap[emp.id]     || [],
+      deductions:     deductionMap[emp.id] || [],
+      bonuses:        bonusMap[emp.id]     || [],
+      total_hours:    parseFloat(attMap[emp.id]?.total_hours    || 0),
+      total_earnings: parseFloat(attMap[emp.id]?.total_earnings || 0),
+      present_days:   parseInt(attMap[emp.id]?.present_days    || 0),
+      absent_days:    parseInt(attMap[emp.id]?.absent_days     || 0),
     }))
 
     res.json({ payroll: rows, month })
