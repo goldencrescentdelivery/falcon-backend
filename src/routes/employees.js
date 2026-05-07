@@ -262,14 +262,18 @@ router.post('/:id/create-user', auth, requireRole('admin','manager','general_man
 
 router.delete('/:id', auth, requireRole('admin'), async (req, res) => {
   try {
-    // 1. Null out employees.user_id to drop the FK reference before deleting the user
-    await query('UPDATE employees SET user_id=NULL WHERE id=$1', [req.params.id])
-    // 2. Delete linked user account
-    await query('DELETE FROM users WHERE emp_id=$1', [req.params.id])
-    // 3. Delete employee (all other FK tables use ON DELETE CASCADE / SET NULL)
-    const result = await query('DELETE FROM employees WHERE id=$1 RETURNING id', [req.params.id])
+    const eid = req.params.id
+    // Null out FK references that have no ON DELETE rule (would otherwise RESTRICT)
+    // receiver_emp_id has no ON DELETE clause; emp_id in handovers uses CASCADE (auto-deleted)
+    await query('UPDATE vehicle_handovers SET receiver_emp_id=NULL WHERE receiver_emp_id=$1', [eid])
+    // payslip_exports has no ON DELETE clause
+    await query('UPDATE payslip_exports SET emp_id=NULL WHERE emp_id=$1', [eid])
+    // employees.user_id FK must be cleared before deleting the linked user row
+    await query('UPDATE employees SET user_id=NULL WHERE id=$1', [eid])
+    await query('DELETE FROM users WHERE emp_id=$1', [eid])
+    const result = await query('DELETE FROM employees WHERE id=$1 RETURNING id', [eid])
     if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
-    req.io?.emit('employee:deleted', { id: req.params.id })
+    req.io?.emit('employee:deleted', { id: eid })
     res.json({ message: 'Employee deleted' })
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
