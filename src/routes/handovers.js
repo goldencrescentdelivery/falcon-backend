@@ -222,7 +222,8 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
     const veh = await query('SELECT station_code, plate FROM vehicles WHERE id=$1', [vehicle_id])
     if (!veh.rows[0]) return res.status(404).json({ error: 'Vehicle not found' })
 
-    const isReturn = type === 'returned'
+    const isReturn      = type === 'returned'
+    const isMaintenance = type === 'maintenance'
 
     // Two-actor return: photos not allowed from Driver A
     if (isReturn && req.files?.length) {
@@ -251,9 +252,13 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
         return res.status(409).json({ error: `${name} already has vehicle ${plate}. They must return it before you can hand over to them.` })
       }
     }
-    // Receiving: 4 photos required
+    // Maintenance: parking location required
+    if (isMaintenance && !handover_to) {
+      return res.status(400).json({ error: 'Parking location is required when parking for maintenance' })
+    }
+    // Maintenance + receive: 4 photos required
     if (!isReturn && (!req.files || req.files.length < 4)) {
-      return res.status(400).json({ error: 'Exactly 4 photos are required when receiving a vehicle' })
+      return res.status(400).json({ error: 'Exactly 4 photos are required' })
     }
 
     const status = isReturn ? 'pending_acceptance' : 'completed'
@@ -305,6 +310,11 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
         `, [photoUrls[0]||null, photoUrls[1]||null, photoUrls[2]||null, photoUrls[3]||null, handover.id])
         finalHandover = updated.rows[0]
       }
+    }
+
+    // Parked for maintenance: mark vehicle accordingly
+    if (isMaintenance) {
+      await query(`UPDATE vehicles SET status='maintenance', updated_at=NOW() WHERE id=$1`, [vehicle_id])
     }
 
     // Broadcast to all so every connected driver refreshes their pending list
