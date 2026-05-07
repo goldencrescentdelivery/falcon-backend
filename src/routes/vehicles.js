@@ -79,10 +79,12 @@ router.get('/assignments', auth, async (req, res) => {
 
     const sql = `
       SELECT va.*, v.plate, v.make, v.model, v.status AS vehicle_status,
-             e.name AS driver_name, e.avatar AS driver_avatar
+             e.name AS driver_name, e.avatar AS driver_avatar,
+             u.name AS assigned_by_name
       FROM vehicle_assignments va
       JOIN vehicles v ON va.vehicle_id=v.id
       LEFT JOIN employees e ON va.emp_id=e.id
+      LEFT JOIN users u ON va.assigned_by=u.id
       WHERE va.date=$1 ${sc ? 'AND va.station_code=$2' : ''}
       ORDER BY v.plate
     `
@@ -138,8 +140,25 @@ router.post('/assignments', auth, requireRole('admin','manager','poc'), async (r
       if ((empCheck.rows[0].role||'').toLowerCase() !== 'driver') {
         return res.status(400).json({ error: 'Only Delivery Associates can be assigned to vehicles' })
       }
-      // Enforce one driver → one vehicle per day
+      // Block POC from overwriting another user's assignment
       const assignDate = date || new Date().toISOString().slice(0,10)
+      const isAdmin = ['admin','manager','general_manager'].includes(req.user.role)
+      if (!isAdmin) {
+        const locked = await query(
+          `SELECT va.assigned_by, u.name AS poc_name, e.name AS driver_name
+           FROM vehicle_assignments va
+           LEFT JOIN users u ON va.assigned_by=u.id
+           LEFT JOIN employees e ON va.emp_id=e.id
+           WHERE va.vehicle_id=$1 AND va.date=$2 AND va.emp_id IS NOT NULL AND va.assigned_by IS NOT NULL AND va.assigned_by != $3`,
+          [vehicle_id, assignDate, req.user.id]
+        )
+        if (locked.rows.length > 0) {
+          const poc    = locked.rows[0].poc_name    || 'Another POC'
+          const driver = locked.rows[0].driver_name || 'a driver'
+          return res.status(409).json({ error: `Vehicle is already assigned to ${driver} by ${poc}. Ask them to remove the assignment first.` })
+        }
+      }
+      // Enforce one driver → one vehicle per day
       const conflict = await query(
         `SELECT va.vehicle_id, v.plate FROM vehicle_assignments va
          JOIN vehicles v ON va.vehicle_id = v.id
