@@ -364,6 +364,57 @@ router.patch('/:id/accept', auth, async (req, res) => {
   } catch (err) { console.error('PATCH /handovers/:id/accept:', err.message); res.status(500).json({ error: 'Server error' }) }
 })
 
+// PATCH /api/handovers/:id/reject
+// Driver B declines the incoming handover — vehicle stays with Driver A
+router.patch('/:id/reject', auth, async (req, res) => {
+  try {
+    const rec = await query('SELECT * FROM vehicle_handovers WHERE id=$1', [req.params.id])
+    if (!rec.rows[0]) return res.status(404).json({ error: 'Handover not found' })
+    const h = rec.rows[0]
+
+    if (h.status !== 'pending_acceptance')
+      return res.status(409).json({ error: `Cannot reject — current status is '${h.status}'` })
+
+    const isAdmin = ['admin','manager','general_manager'].includes(req.user.role)
+    if (!isAdmin && h.receiver_emp_id !== req.user.emp_id)
+      return res.status(403).json({ error: 'Only the designated receiving driver can reject this handover' })
+
+    const updated = await query(`
+      UPDATE vehicle_handovers
+      SET status='rejected', updated_at=NOW()
+      WHERE id=$1 RETURNING *
+    `, [req.params.id])
+
+    req.io?.emit('handover:updated', updated.rows[0])
+
+    // Notify Driver A that the handover was rejected
+    try {
+      const senderUser = await query(`SELECT id FROM users WHERE emp_id=$1`, [h.emp_id])
+      if (senderUser.rows[0]) {
+        const suid = senderUser.rows[0].id
+        const plate = h.vehicle_id
+        const receiverName = req.user.name || 'The driver'
+        await query(`INSERT INTO notifications (user_id, title, body, type, ref_id) VALUES ($1,$2,$3,'handover',$4)`,
+          [suid, 'Handover Rejected',
+           `${receiverName} declined the handover for vehicle ${plate}. You still have the vehicle.`,
+           h.id])
+        req.io?.to(`user:${suid}`).emit('notification:new', {
+          title: 'Handover Rejected',
+          body: `${receiverName} declined the handover for vehicle ${plate}. You still have the vehicle.`,
+          type: 'handover',
+        })
+        await sendPushToUsers([suid], {
+          title: 'Handover Rejected',
+          body: `${receiverName} declined the handover for vehicle ${plate}. You still have the vehicle.`,
+          url: '/driver',
+        })
+      }
+    } catch(e) { console.warn('[handovers] notify sender on reject failed:', e.message) }
+
+    res.json({ handover: updated.rows[0] })
+  } catch (err) { console.error('PATCH /handovers/:id/reject:', err.message); res.status(500).json({ error: 'Server error' }) }
+})
+
 // PATCH /api/handovers/:id/complete
 // Driver B uploads exactly 4 photos and marks the handover complete.
 // Also auto-creates a 'received' record for Driver B so their vehicle tracking works.
