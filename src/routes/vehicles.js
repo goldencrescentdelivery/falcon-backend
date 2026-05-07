@@ -6,11 +6,8 @@ const V = require('../middleware/validate')
 // GET /api/vehicles
 router.get('/', auth, async (req, res) => {
   try {
-    // POC: always scope to their own station
-    // Admin/GM: use station_code query param if provided
-    const sc = req.user.role === 'poc'
-      ? req.user.station_code
-      : (req.query.station_code || null)
+    // All roles see all vehicles — station_code param is optional for admin filtering only
+    const sc = req.user.role !== 'poc' ? (req.query.station_code || null) : null
 
     let sql  = 'SELECT * FROM vehicles'
     const vals = []
@@ -66,22 +63,19 @@ router.delete('/:id', auth, requireRole('admin','manager','poc'), async (req, re
 router.get('/assignments', auth, async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().slice(0,10)
-    let sc     = req.query.station_code
-    if (req.user.role === 'poc') sc = req.user.station_code
+    // station_code is optional filter for admins only — POC sees all assignments
+    const sc = req.user.role !== 'poc' ? (req.query.station_code || null) : null
 
-    // Auto-carry forward previous day assignments for vehicles with no assignment today
-    if (sc) {
-      await query(`
-        INSERT INTO vehicle_assignments (vehicle_id, emp_id, date, station_code, notes, assigned_by)
-        SELECT va.vehicle_id, va.emp_id, $1, va.station_code, va.notes, va.assigned_by
-        FROM vehicle_assignments va
-        JOIN vehicles v ON va.vehicle_id = v.id
-        WHERE va.date = (SELECT MAX(date) FROM vehicle_assignments WHERE date < $1 AND station_code=$2)
-          AND va.station_code = $2
-          AND NOT EXISTS (SELECT 1 FROM vehicle_assignments WHERE vehicle_id=va.vehicle_id AND date=$1)
-        ON CONFLICT (vehicle_id, date) DO NOTHING
-      `, [date, sc])
-    }
+    // Auto-carry forward: for each vehicle, copy its most recent assignment if none exists today
+    await query(`
+      INSERT INTO vehicle_assignments (vehicle_id, emp_id, date, station_code, notes, assigned_by)
+      SELECT DISTINCT ON (va.vehicle_id) va.vehicle_id, va.emp_id, $1, va.station_code, va.notes, va.assigned_by
+      FROM vehicle_assignments va
+      WHERE va.date < $1
+        AND NOT EXISTS (SELECT 1 FROM vehicle_assignments WHERE vehicle_id=va.vehicle_id AND date=$1)
+      ORDER BY va.vehicle_id, va.date DESC
+      ON CONFLICT (vehicle_id, date) DO NOTHING
+    `, [date])
 
     const sql = `
       SELECT va.*, v.plate, v.make, v.model, v.status AS vehicle_status,
