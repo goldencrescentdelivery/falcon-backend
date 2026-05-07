@@ -139,10 +139,21 @@ router.post('/assignments', auth, requireRole('admin','manager','poc'), async (r
     const { vehicle_id, emp_id, date, station_code, notes } = req.body
     // Only DAs (Driver role) can be assigned to vehicles
     if (emp_id) {
-      const empCheck = await query('SELECT role FROM employees WHERE id=$1', [emp_id])
+      const empCheck = await query('SELECT role, name FROM employees WHERE id=$1', [emp_id])
       if (!empCheck.rows[0]) return res.status(400).json({ error: 'Employee not found' })
       if ((empCheck.rows[0].role||'').toLowerCase() !== 'driver') {
         return res.status(400).json({ error: 'Only Delivery Associates can be assigned to vehicles' })
+      }
+      // Enforce one driver → one vehicle per day
+      const assignDate = date || new Date().toISOString().slice(0,10)
+      const conflict = await query(
+        `SELECT va.vehicle_id, v.plate FROM vehicle_assignments va
+         JOIN vehicles v ON va.vehicle_id = v.id
+         WHERE va.emp_id = $1 AND va.date = $2 AND va.vehicle_id != $3 AND va.emp_id IS NOT NULL`,
+        [emp_id, assignDate, vehicle_id]
+      )
+      if (conflict.rows.length > 0) {
+        return res.status(409).json({ error: `${empCheck.rows[0].name} is already assigned to vehicle ${conflict.rows[0].plate} on this date. Remove that assignment first.` })
       }
     }
     const sc = req.user.role === 'poc' ? req.user.station_code : station_code
