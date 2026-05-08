@@ -6,16 +6,24 @@ let _liveData  = null
 let _pushedAt  = 0
 const BRIDGE_KEY = process.env.ETISALAT_BRIDGE_KEY || 'gcd-etisalat-bridge-2026'
 
+// Fields the frontend actually uses — everything else is discarded on push
+const KEEP = ['name','status','gpsspeed','speed','virtualodometer','address','drivername','lastcommunication','duration']
+
 // POST /api/etisalat/push — called by the UAE bridge script (not the browser)
 router.post('/push', (req, res) => {
   if (req.headers['x-bridge-key'] !== BRIDGE_KEY) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
-  _liveData = req.body
+  const raw  = req.body
+  const rows = (raw?.rows || raw?.result?.rows || []).map(v => {
+    const slim = {}
+    for (const k of KEEP) if (v[k] !== undefined) slim[k] = v[k]
+    return slim
+  })
+  _liveData = { rows }
   _pushedAt = Date.now()
-  const rows = _liveData?.rows?.length ?? 0
-  console.log(`[etisalat] push received — ${rows} vehicles at ${new Date().toISOString()}`)
-  res.json({ ok: true, rows })
+  console.log(`[etisalat] push received — ${rows.length} vehicles at ${new Date().toISOString()}`)
+  res.json({ ok: true, rows: rows.length })
 })
 
 // GET /api/etisalat/live — returns the last pushed data
@@ -24,7 +32,8 @@ router.get('/live', auth, (req, res) => {
     return res.status(503).json({ error: 'No data yet — bridge not running', rows: [] })
   }
   const ageSeconds = Math.round((Date.now() - _pushedAt) / 1000)
-  res.json({ ..._liveData, _pushedAt, _ageSeconds: ageSeconds })
+  res.set('Cache-Control', 'private, max-age=55')
+  res.json({ rows: _liveData.rows, _pushedAt, _ageSeconds: ageSeconds })
 })
 
 // GET /api/etisalat/vehicle/:id — kept for future use

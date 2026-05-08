@@ -90,11 +90,14 @@ router.post('/', auth, ALLOWED, async (req, res) => {
     const status  = isAdmin ? 'approved' : 'pending'
 
     const year = new Date().getFullYear()
-    const countRes = await query(
-      `SELECT COUNT(*) FROM office_letters WHERE EXTRACT(YEAR FROM created_at) = $1`, [year]
+    const seqRes = await query(
+      `SELECT ref_no FROM office_letters WHERE ref_no LIKE $1 ORDER BY ref_no DESC LIMIT 1`,
+      [`GCD/LTR/${year}/%`]
     )
-    const seq    = parseInt(countRes.rows[0].count) + 1
-    const ref_no = `GCD/LTR/${year}/${String(seq).padStart(4, '0')}`
+    const lastSeq = seqRes.rows[0]
+      ? parseInt(seqRes.rows[0].ref_no.split('/').pop()) || 0
+      : 0
+    const ref_no = `GCD/LTR/${year}/${String(lastSeq + 1).padStart(4, '0')}`
 
     const result = await query(`
       INSERT INTO office_letters
