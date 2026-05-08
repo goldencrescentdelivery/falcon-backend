@@ -20,15 +20,16 @@ async function etFetch(path, body = {}) {
 }
 
 // GET /api/etisalat/live — all vehicles with live status
-// Returns rows with: name (plate), id, latitude, longitude, ignitiondin4 (0/1),
-//   gpsspeed, speed, address, drivername, lastcommunication, status (0-4),
-//   virtualodometer, clientorg, duration, geoname
 router.get('/live', auth, async (_req, res) => {
   try {
     const data = await etFetch(
       '/Thingworx/Things/PostgreSQL/Services/GetVehicleByClientNameAndFilter_APIByAppKey',
       { Username: USERNAME, PageNumber: '1', PlateFilter: '' }
     )
+    // Log top-level keys so we can verify response structure
+    const keys = Object.keys(data || {})
+    const rowCount = (data?.rows || data?.result?.rows || []).length
+    console.log('[etisalat] live response keys:', keys, '| rows:', rowCount)
     res.json(data)
   } catch (err) {
     console.error('[etisalat] live error:', err.message)
