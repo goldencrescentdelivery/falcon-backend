@@ -12,7 +12,7 @@ router.get('/documents', auth, requireRole(...ROLES), async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: err.message }) }
 })
 
-router.post('/documents', auth, requireRole('admin','general_manager','hr'), async (req, res) => {
+router.post('/documents', auth, requireRole('admin','general_manager','hr','accountant'), async (req, res) => {
   try {
     const { name, document_number, issued_by, issue_date, expiry_date, category, notes } = req.body
     if (!name) return res.status(400).json({ error: 'Document name required' })
@@ -27,7 +27,7 @@ router.post('/documents', auth, requireRole('admin','general_manager','hr'), asy
   } catch (err) { console.error(err); res.status(500).json({ error: err.message }) }
 })
 
-router.put('/documents/:id', auth, requireRole('admin','general_manager','hr'), async (req, res) => {
+router.put('/documents/:id', auth, requireRole('admin','general_manager','hr','accountant'), async (req, res) => {
   try {
     const { name, document_number, issued_by, issue_date, expiry_date, category, notes } = req.body
     const sd = v => (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) ? v : null
@@ -41,7 +41,7 @@ router.put('/documents/:id', auth, requireRole('admin','general_manager','hr'), 
   } catch (err) { console.error(err); res.status(500).json({ error: err.message }) }
 })
 
-router.delete('/documents/:id', auth, requireRole('admin','general_manager','hr'), async (req, res) => {
+router.delete('/documents/:id', auth, requireRole('admin','general_manager','hr','accountant'), async (req, res) => {
   try {
     const r = await query(`DELETE FROM office_documents WHERE id=$1 RETURNING id`, [req.params.id])
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' })

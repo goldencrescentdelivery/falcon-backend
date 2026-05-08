@@ -252,6 +252,7 @@ async function autoMigrate() {
     await query(`ALTER TABLE office_letters ADD COLUMN IF NOT EXISTS signature_data  TEXT`)
     await query(`ALTER TABLE office_letters ADD COLUMN IF NOT EXISTS show_sign       BOOLEAN DEFAULT TRUE`)
     await query(`ALTER TABLE office_letters ADD COLUMN IF NOT EXISTS show_stamp      BOOLEAN DEFAULT TRUE`)
+    await query(`ALTER TABLE office_letters ADD COLUMN IF NOT EXISTS show_qr         BOOLEAN DEFAULT TRUE`)
     await query(`ALTER TABLE office_letters ADD COLUMN IF NOT EXISTS status          TEXT DEFAULT 'approved'`)
   } catch(e) { console.warn('migrate office_letters signer:', e.message) }
 
