@@ -63,6 +63,7 @@ router.delete('/:id', auth, requireRole('admin','manager','poc'), async (req, re
 router.get('/assignments', auth, async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().slice(0,10)
+    const empId = req.user.role === 'driver' ? req.user.emp_id : (req.query.emp_id || null)
     // station_code is optional filter for admins only — POC sees all assignments
     const sc = req.user.role !== 'poc' ? (req.query.station_code || null) : null
 
@@ -77,7 +78,7 @@ router.get('/assignments', auth, async (req, res) => {
       ON CONFLICT (vehicle_id, date) DO NOTHING
     `, [date])
 
-    const sql = `
+    let sql = `
       SELECT va.*, v.plate, v.make, v.model, v.status AS vehicle_status,
              e.name AS driver_name, e.avatar AS driver_avatar,
              u.name AS assigned_by_name
@@ -85,10 +86,19 @@ router.get('/assignments', auth, async (req, res) => {
       JOIN vehicles v ON va.vehicle_id=v.id
       LEFT JOIN employees e ON va.emp_id=e.id
       LEFT JOIN users u ON va.assigned_by=u.id
-      WHERE va.date=$1 ${sc ? 'AND va.station_code=$2' : ''}
-      ORDER BY v.plate
+      WHERE va.date=$1
     `
-    const result = await query(sql, sc ? [date, sc] : [date])
+    const vals = [date]
+    if (sc) {
+      vals.push(sc)
+      sql += ` AND va.station_code=$${vals.length}`
+    }
+    if (empId) {
+      vals.push(empId)
+      sql += ` AND va.emp_id=$${vals.length}`
+    }
+    sql += ' ORDER BY v.plate'
+    const result = await query(sql, vals)
     res.json({ assignments: result.rows, date })
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
