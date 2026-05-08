@@ -37,6 +37,7 @@ router.get('/for-handover', auth, async (req, res) => {
        ORDER BY name`,
       []
     )
+    res.set('Cache-Control', 'private, max-age=60')
     res.json({ employees: result.rows })
   } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })

@@ -1,10 +1,11 @@
 require('dotenv').config()
-const express    = require('express')
-const http       = require('http')
-const { Server } = require('socket.io')
-const cors       = require('cors')
-const helmet     = require('helmet')
-const morgan     = require('morgan')
+const express      = require('express')
+const http         = require('http')
+const { Server }   = require('socket.io')
+const cors         = require('cors')
+const helmet       = require('helmet')
+const morgan       = require('morgan')
+const compression  = require('compression')
 const rateLimit    = require('express-rate-limit')
 const cookieParser = require('cookie-parser')
 
@@ -28,6 +29,7 @@ const io = new Server(server, {
 require('./socket')(io)
 
 // ── Security & Middleware ──────────────────────────────────────
+app.use(compression())
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS
@@ -477,9 +479,16 @@ async function autoMigrate() {
     // vehicles — plate search, status filter
     `CREATE INDEX IF NOT EXISTS idx_vehicles_plate    ON vehicles(plate_number)`,
     `CREATE INDEX IF NOT EXISTS idx_vehicles_status   ON vehicles(status)`,
-    // handovers — by driver, by date
-    `CREATE INDEX IF NOT EXISTS idx_handovers_driver  ON vehicle_handovers(driver_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_handovers_date    ON vehicle_handovers(handover_date DESC)`,
+    // handovers — by emp, by submitted_at (actual sort column), by status, by station
+    `CREATE INDEX IF NOT EXISTS idx_handovers_emp        ON vehicle_handovers(emp_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_handovers_receiver   ON vehicle_handovers(receiver_emp_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_handovers_submitted  ON vehicle_handovers(submitted_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_handovers_status     ON vehicle_handovers(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_handovers_station    ON vehicle_handovers(station_code)`,
+    `CREATE INDEX IF NOT EXISTS idx_handovers_vehicle    ON vehicle_handovers(vehicle_id, type, submitted_at DESC)`,
+    // vehicle_assignments — carry-forward + date lookups
+    `CREATE INDEX IF NOT EXISTS idx_va_vehicle_date      ON vehicle_assignments(vehicle_id, date DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_va_emp_date          ON vehicle_assignments(emp_id, date DESC)`,
     // advances — by employee
     `CREATE INDEX IF NOT EXISTS idx_advances_emp      ON advances(emp_id)`,
     `CREATE INDEX IF NOT EXISTS idx_advances_status   ON advances(status)`,

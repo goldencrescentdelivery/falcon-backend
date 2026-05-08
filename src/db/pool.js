@@ -49,8 +49,8 @@ function createPool() {
     password,  // passed as-is, no URL encoding issues
     ssl:       { rejectUnauthorized: false },
     max:       10,
-    min:       0,
-    idleTimeoutMillis:     10000,
+    min:       2,
+    idleTimeoutMillis:     30000,
     connectionTimeoutMillis: 15000,
   })
 }

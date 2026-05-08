@@ -126,8 +126,7 @@ router.get('/', auth, async (req, res) => {
     }
     if (type)   { vals.push(type);   sql += ` AND h.type=$${vals.length}` }
     if (status) { vals.push(status); sql += ` AND h.status=$${vals.length}` }
-    sql += ` ORDER BY h.submitted_at DESC`
-    if (limit) sql += ` LIMIT ${parseInt(limit)}`
+    sql += ` ORDER BY h.submitted_at DESC LIMIT ${Math.min(parseInt(limit) || 100, 500)}`
     const result = await query(sql, vals)
     res.json({ handovers: result.rows })
   } catch (err) { console.error('GET /handovers:', err.message); res.status(500).json({ error: err.message }) }

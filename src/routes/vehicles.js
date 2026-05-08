@@ -15,6 +15,7 @@ router.get('/', auth, async (req, res) => {
     sql += ' ORDER BY station_code, plate'
 
     const result = await query(sql, vals)
+    res.set('Cache-Control', 'private, max-age=30')
     res.json({ vehicles: result.rows })
   } catch (err) { res.status(500).json({ error: 'Server error' }) }
 })
