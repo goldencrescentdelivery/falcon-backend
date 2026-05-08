@@ -103,6 +103,47 @@ router.get('/assignments', auth, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
+// GET /api/vehicles/assignments/current?emp_id=&date=
+// Current assignment is stateful: the latest assignment for a vehicle remains
+// active until a newer unassignment/reassignment or a handover return.
+router.get('/assignments/current', auth, async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().slice(0,10)
+    const empId = req.user.role === 'driver' ? req.user.emp_id : (req.query.emp_id || null)
+    if (!empId) return res.status(400).json({ error: 'emp_id required' })
+
+    const result = await query(`
+      WITH latest AS (
+        SELECT DISTINCT ON (va.vehicle_id)
+               va.*
+        FROM vehicle_assignments va
+        WHERE va.date <= $2
+        ORDER BY va.vehicle_id, va.date DESC, va.created_at DESC
+      )
+      SELECT latest.*, v.plate, v.make, v.model, v.year, v.status AS vehicle_status,
+             e.name AS driver_name, e.avatar AS driver_avatar,
+             u.name AS assigned_by_name
+      FROM latest
+      JOIN vehicles v ON latest.vehicle_id=v.id
+      LEFT JOIN employees e ON latest.emp_id=e.id
+      LEFT JOIN users u ON latest.assigned_by=u.id
+      WHERE latest.emp_id=$1
+        AND NOT EXISTS (
+          SELECT 1
+          FROM vehicle_handovers h
+          WHERE h.vehicle_id=latest.vehicle_id
+            AND h.emp_id=latest.emp_id
+            AND h.type='returned'
+            AND h.status IN ('pending_acceptance','accepted','poc_pending','completed')
+            AND h.submitted_at >= latest.created_at
+        )
+      ORDER BY latest.date DESC, v.plate
+    `, [empId, date])
+
+    res.json({ assignments: result.rows, date })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
 // GET /api/vehicles/assignments/history?vehicle_id=&emp_id=&limit=
 // Returns past assignments for a vehicle or a driver, newest first
 router.get('/assignments/history', auth, async (req, res) => {
