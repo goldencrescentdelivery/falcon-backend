@@ -89,7 +89,7 @@ app.use('/api/office',         require('./routes/office'))
 app.use('/api/letters',        require('./routes/letters'))
 app.use('/api/notifications',  require('./routes/notifications'))
 app.use('/api/tasks',          require('./routes/tasks'))
-app.use('/api/etisalat',       require('./routes/etisalat'))
+
 
 // ── Health check ───────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status:'ok', ts:new Date().toISOString() }))
