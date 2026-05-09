@@ -1,9 +1,13 @@
 // Prevent unhandled async errors from crashing the process
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[unhandledRejection] Unhandled promise rejection:', reason)
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason)
 })
 process.on('uncaughtException', (err) => {
-  console.error('[uncaughtException] Uncaught exception:', err.message, err.stack)
+  console.error('[uncaughtException]', err.message, err.stack)
+})
+process.on('SIGTERM', () => {
+  console.log('[SIGTERM] Graceful shutdown')
+  process.exit(0)
 })
 
 require('dotenv').config()
