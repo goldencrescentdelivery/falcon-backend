@@ -14,14 +14,24 @@ const server = http.createServer(app)
 
 app.set('trust proxy', 1)
 
-// ── Socket.io ──────────────────────────────────────────────────
-const SOCKET_ORIGINS = process.env.ALLOWED_ORIGINS
+// ── CORS origins ───────────────────────────────────────────────
+const EXPLICIT_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : (process.env.NODE_ENV === 'production' ? [] : ['http://localhost:3000'])
+  : []
 
+function isAllowedOrigin(origin) {
+  if (!origin) return true
+  if (EXPLICIT_ORIGINS.includes(origin)) return true
+  // Allow any Vercel preview deployment for this project
+  if (/^https:\/\/gcd-frontend[a-z0-9-]*\.vercel\.app$/.test(origin)) return true
+  if (process.env.NODE_ENV !== 'production') return true
+  return false
+}
+
+// ── Socket.io ──────────────────────────────────────────────────
 const io = new Server(server, {
   cors: {
-    origin:      SOCKET_ORIGINS,
+    origin:      isAllowedOrigin,
     methods:     ['GET', 'POST'],
     credentials: true,
   }
@@ -32,9 +42,7 @@ require('./socket')(io)
 app.use(compression())
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-    : '*',
+  origin: isAllowedOrigin,
   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization']
 }))
