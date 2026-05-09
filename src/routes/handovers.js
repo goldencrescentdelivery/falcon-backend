@@ -174,6 +174,7 @@ router.get('/current', auth, async (req, res) => {
         AND NOT EXISTS (
           SELECT 1 FROM vehicle_handovers h2
           WHERE h2.vehicle_id=h.vehicle_id AND h2.type='returned'
+          AND h2.status NOT IN ('pending_acceptance','rejected')
           AND h2.submitted_at > h.submitted_at
         )`
     const vals = []
@@ -366,7 +367,12 @@ router.post('/', auth, upload.array('photos', 4), async (req, res) => {
 // Driver B acknowledges and accepts the pending return
 router.patch('/:id/accept', auth, async (req, res) => {
   try {
-    const rec = await query('SELECT * FROM vehicle_handovers WHERE id=$1', [req.params.id])
+    const rec = await query(`
+      SELECT h.*, v.plate AS vehicle_plate
+      FROM vehicle_handovers h
+      JOIN vehicles v ON h.vehicle_id=v.id
+      WHERE h.id=$1
+    `, [req.params.id])
     if (!rec.rows[0]) return res.status(404).json({ error: 'Handover not found' })
     const h = rec.rows[0]
 
@@ -384,6 +390,33 @@ router.patch('/:id/accept', auth, async (req, res) => {
     `, [req.params.id])
 
     req.io?.emit('handover:updated', updated.rows[0])
+
+    // Notify Driver A their handover has been accepted — they're done
+    try {
+      const driverAUser = await query(`SELECT id FROM users WHERE emp_id=$1`, [h.emp_id])
+      if (driverAUser.rows[0]) {
+        const suid = driverAUser.rows[0].id
+        const receiverName = req.user.name || 'The receiving driver'
+        const plate = h.vehicle_plate || h.vehicle_id
+        await query(
+          `INSERT INTO notifications (user_id, title, body, type, ref_id) VALUES ($1,$2,$3,'handover',$4)`,
+          [suid, 'Handover Accepted',
+           `${receiverName} accepted your handover of ${plate}. Your return is complete!`,
+           h.id]
+        )
+        req.io?.to(`user:${suid}`).emit('notification:new', {
+          title: 'Handover Accepted',
+          body: `${receiverName} accepted your handover of ${plate}. Your return is complete!`,
+          type: 'handover',
+        })
+        await sendPushToUsers([suid], {
+          title: 'Handover Accepted ✓',
+          body: `${receiverName} accepted ${plate}. Your handover is successful!`,
+          url: '/driver',
+        })
+      }
+    } catch(e) { console.warn('[handovers] notify driver A on accept:', e.message) }
+
     res.json({ handover: updated.rows[0] })
   } catch (err) { console.error('PATCH /handovers/:id/accept:', err.message); res.status(500).json({ error: 'Server error' }) }
 })
