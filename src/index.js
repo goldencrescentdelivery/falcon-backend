@@ -19,13 +19,12 @@ const EXPLICIT_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
   : []
 
-function isAllowedOrigin(origin) {
-  if (!origin) return true
-  if (EXPLICIT_ORIGINS.includes(origin)) return true
-  // Allow any Vercel preview deployment for this project
-  if (/^https:\/\/gcd-frontend[a-z0-9-]*\.vercel\.app$/.test(origin)) return true
-  if (process.env.NODE_ENV !== 'production') return true
-  return false
+function isAllowedOrigin(origin, callback) {
+  if (!origin) return callback(null, true)
+  if (EXPLICIT_ORIGINS.includes(origin)) return callback(null, true)
+  if (/^https:\/\/gcd-frontend[a-z0-9-]*\.vercel\.app$/.test(origin)) return callback(null, true)
+  if (process.env.NODE_ENV !== 'production') return callback(null, true)
+  return callback(null, false)
 }
 
 // ── Socket.io ──────────────────────────────────────────────────
