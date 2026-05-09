@@ -466,8 +466,8 @@ async function autoMigrate() {
     `CREATE INDEX IF NOT EXISTS idx_leaves_created    ON leaves(created_at DESC)`,
     // payroll — lookup by employee, by period, by employee+period
     `CREATE INDEX IF NOT EXISTS idx_payroll_emp       ON payroll(emp_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_payroll_period    ON payroll(month, year)`,
-    `CREATE INDEX IF NOT EXISTS idx_payroll_emp_period ON payroll(emp_id, month, year)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_period    ON payroll(month)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_emp_period ON payroll(emp_id, month)`,
     // petty_cash — balance queries, type filtering
     `CREATE INDEX IF NOT EXISTS idx_pc_user_date      ON petty_cash(user_id, date DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_pc_user_type      ON petty_cash(user_id, type)`,
@@ -479,7 +479,7 @@ async function autoMigrate() {
     `CREATE INDEX IF NOT EXISTS idx_users_role        ON users(role)`,
     `CREATE INDEX IF NOT EXISTS idx_users_station     ON users(station_code)`,
     // vehicles — plate search, status filter
-    `CREATE INDEX IF NOT EXISTS idx_vehicles_plate    ON vehicles(plate_number)`,
+    `CREATE INDEX IF NOT EXISTS idx_vehicles_plate    ON vehicles(plate)`,
     `CREATE INDEX IF NOT EXISTS idx_vehicles_status   ON vehicles(status)`,
     // handovers — by emp, by submitted_at (actual sort column), by status, by station
     `CREATE INDEX IF NOT EXISTS idx_handovers_emp        ON vehicle_handovers(emp_id)`,
@@ -492,15 +492,15 @@ async function autoMigrate() {
     `CREATE INDEX IF NOT EXISTS idx_va_vehicle_date      ON vehicle_assignments(vehicle_id, date DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_va_emp_date          ON vehicle_assignments(emp_id, date DESC)`,
     // advances — by employee
-    `CREATE INDEX IF NOT EXISTS idx_advances_emp      ON advances(emp_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_advances_status   ON advances(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_advances_emp      ON salary_advances(emp_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_advances_status   ON salary_advances(status)`,
     // expenses — by date
     `CREATE INDEX IF NOT EXISTS idx_expenses_date     ON expenses(date DESC)`,
     // damage — by vehicle, by date
     `CREATE INDEX IF NOT EXISTS idx_damage_vehicle    ON damage_reports(vehicle_id)`,
     `CREATE INDEX IF NOT EXISTS idx_damage_date       ON damage_reports(date DESC)`,
     // sims — by employee
-    `CREATE INDEX IF NOT EXISTS idx_sims_emp          ON sims(emp_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_sims_emp          ON sim_cards(emp_id)`,
   ]
   for (const sql of indexes) {
     try { await query(sql) } catch(e) { console.warn('index:', e.message) }
