@@ -38,15 +38,20 @@ const io = new Server(server, {
 })
 require('./socket')(io)
 
-// ── Security & Middleware ──────────────────────────────────────
-app.use(compression())
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
-app.use(cors({
+// ── CORS — must be first so preflight OPTIONS never hits rate-limiter/helmet ──
+const corsOptions = {
   origin: CORS_ORIGINS,
   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization'],
   credentials: true,
-}))
+  optionsSuccessStatus: 200,
+}
+app.use(cors(corsOptions))
+app.options('*', cors(corsOptions))   // explicit preflight handler for all routes
+
+// ── Security & other middleware ────────────────────────────────
+app.use(compression())
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
 app.use(cookieParser())
 app.use(express.json({ limit: '10mb' }))
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
