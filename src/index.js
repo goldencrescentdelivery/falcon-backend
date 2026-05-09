@@ -1,3 +1,11 @@
+// Prevent unhandled async errors from crashing the process
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[unhandledRejection] Unhandled promise rejection:', reason)
+})
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException] Uncaught exception:', err.message, err.stack)
+})
+
 require('dotenv').config()
 const express      = require('express')
 const http         = require('http')
