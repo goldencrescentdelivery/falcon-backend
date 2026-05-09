@@ -533,9 +533,12 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`GCD API running on port ${PORT}`)
 
   // Run migrations and init tasks in background — don't block the healthcheck
+  console.log('[startup] running autoMigrate...')
   autoMigrate().then(async () => {
+    console.log('[startup] autoMigrate done, running VAPID init...')
     try { await require('./lib/webpush').initVapid() } catch(e) { console.warn('VAPID init:', e.message) }
 
+    console.log('[startup] VAPID done, checking Redis...')
     try {
       const { pubClient, subClient, isAvailable } = require('./lib/redis')
       if (isAvailable && pubClient && subClient) {
@@ -546,14 +549,17 @@ server.listen(PORT, '0.0.0.0', () => {
       }
     } catch(e) { console.warn('[socket.io] Redis adapter failed:', e.message) }
 
+    console.log('[startup] starting payroll worker...')
     try {
       const { startPayrollWorker } = require('./jobs/workers/payroll.worker')
       startPayrollWorker(io)
     } catch(e) { console.warn('[payroll-worker] startup failed:', e.message) }
 
+    console.log('[startup] starting scheduler...')
     try { require('./jobs/scheduler').start() } catch(e) { console.warn('[scheduler] startup failed:', e.message) }
 
-  }).catch(e => { console.error('Migration failed:', e.message) })
+    console.log('[startup] ✅ SERVER FULLY READY')
+  }).catch(e => { console.error('[startup] Migration failed:', e.message) })
 })
 
 
