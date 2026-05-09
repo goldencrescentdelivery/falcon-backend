@@ -509,37 +509,33 @@ async function autoMigrate() {
 }
 
 // ── Start ──────────────────────────────────────────────────────
+// Listen immediately so Railway healthcheck passes, then migrate in background
 const PORT = process.env.PORT || 3001
-autoMigrate().then(async () => {
-  // Init VAPID keys after tables exist
-  try { await require('./lib/webpush').initVapid() } catch(e) { console.warn('VAPID init:', e.message) }
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`GCD API running on port ${PORT}`)
 
-  // Phase 8 — Redis adapter + payroll worker (no-op if REDIS_URL not set)
-  try {
-    const { pubClient, subClient, isAvailable } = require('./lib/redis')
-    if (isAvailable && pubClient && subClient) {
-      const { createAdapter } = require('@socket.io/redis-adapter')
-      await Promise.all([pubClient.connect(), subClient.connect()])
-      io.adapter(createAdapter(pubClient, subClient))
-      console.log('[socket.io] Redis adapter attached')
-    }
-  } catch(e) { console.warn('[socket.io] Redis adapter failed:', e.message) }
+  // Run migrations and init tasks in background — don't block the healthcheck
+  autoMigrate().then(async () => {
+    try { await require('./lib/webpush').initVapid() } catch(e) { console.warn('VAPID init:', e.message) }
 
-  try {
-    const { startPayrollWorker } = require('./jobs/workers/payroll.worker')
-    startPayrollWorker(io)
-  } catch(e) { console.warn('[payroll-worker] startup failed:', e.message) }
+    try {
+      const { pubClient, subClient, isAvailable } = require('./lib/redis')
+      if (isAvailable && pubClient && subClient) {
+        const { createAdapter } = require('@socket.io/redis-adapter')
+        await Promise.all([pubClient.connect(), subClient.connect()])
+        io.adapter(createAdapter(pubClient, subClient))
+        console.log('[socket.io] Redis adapter attached')
+      }
+    } catch(e) { console.warn('[socket.io] Redis adapter failed:', e.message) }
 
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`GCD API running on port ${PORT}`)
-  })
+    try {
+      const { startPayrollWorker } = require('./jobs/workers/payroll.worker')
+      startPayrollWorker(io)
+    } catch(e) { console.warn('[payroll-worker] startup failed:', e.message) }
 
-  require('./jobs/scheduler').start()
-}).catch(e => {
-  console.error('Migration failed, starting anyway:', e.message)
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`GCD API running on port ${PORT}`)
-  })
+    try { require('./jobs/scheduler').start() } catch(e) { console.warn('[scheduler] startup failed:', e.message) }
+
+  }).catch(e => { console.error('Migration failed:', e.message) })
 })
 
 
