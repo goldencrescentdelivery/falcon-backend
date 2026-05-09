@@ -466,7 +466,7 @@ async function autoMigrate() {
     // attendance — list by employee+date, by date alone, by station+date
     `CREATE INDEX IF NOT EXISTS idx_att_emp_date      ON attendance(emp_id, date DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_att_date          ON attendance(date DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_att_station_date  ON attendance(station_code, date DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_att_station_date  ON attendance(emp_id, date DESC)`,
     // leaves — lookup by employee, approval pipeline filter, status, recency
     `CREATE INDEX IF NOT EXISTS idx_leaves_emp        ON leaves(emp_id)`,
     `CREATE INDEX IF NOT EXISTS idx_leaves_approval   ON leaves(poc_status, hr_status, mgr_status)`,
@@ -506,7 +506,7 @@ async function autoMigrate() {
     `CREATE INDEX IF NOT EXISTS idx_expenses_date     ON expenses(date DESC)`,
     // damage — by vehicle, by date
     `CREATE INDEX IF NOT EXISTS idx_damage_vehicle    ON damage_reports(vehicle_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_damage_date       ON damage_reports(date DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_damage_date       ON damage_reports(reported_at DESC)`,
     // sims — by employee
     `CREATE INDEX IF NOT EXISTS idx_sims_emp          ON sim_cards(emp_id)`,
   ]
