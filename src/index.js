@@ -14,45 +14,31 @@ const server = http.createServer(app)
 
 app.set('trust proxy', 1)
 
-// ── CORS ────────────────────────────────────────────────────────
-const EXPLICIT_ORIGINS = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : []
-
-function checkOrigin(origin) {
-  if (!origin) return true
-  if (EXPLICIT_ORIGINS.includes(origin)) return true
-  if (/^https:\/\/gcd-frontend[a-z0-9-]*\.vercel\.app$/.test(origin)) return true
-  if (process.env.NODE_ENV !== 'production') return true
-  return false
-}
+// ── CORS origins ───────────────────────────────────────────────
+const CORS_ORIGINS = [
+  'https://fms.goldencrescent.ae',
+  'https://gcd-frontend-kappa.vercel.app',
+  ...(process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+    : []),
+  ...(process.env.NODE_ENV !== 'production' ? ['http://localhost:3000'] : []),
+]
 
 // ── Socket.io ──────────────────────────────────────────────────
 const io = new Server(server, {
-  cors: {
-    origin: (origin, cb) => cb(null, checkOrigin(origin)),
-    methods:     ['GET', 'POST'],
-    credentials: true,
-  }
+  cors: { origin: CORS_ORIGINS, methods: ['GET','POST'], credentials: true }
 })
 require('./socket')(io)
 
 // ── Security & Middleware ──────────────────────────────────────
 app.use(compression())
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
-
-// Manual CORS — handles preflight and sets headers on every response
-app.use((req, res, next) => {
-  const origin = req.headers.origin
-  if (checkOrigin(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*')
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    res.setHeader('Access-Control-Allow-Credentials', 'true')
-  }
-  if (req.method === 'OPTIONS') return res.status(204).end()
-  next()
-})
+app.use(cors({
+  origin: CORS_ORIGINS,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization'],
+  credentials: true,
+}))
 app.use(cookieParser())
 app.use(express.json({ limit: '10mb' }))
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
