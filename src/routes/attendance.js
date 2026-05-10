@@ -29,10 +29,9 @@ router.post('/', auth, requireRole('admin','manager','general_manager','poc','ac
     const { emp_id, date, check_in, check_out, status, note, hours_worked, shipments_returned } = req.body
     if (!emp_id || !status) return res.status(400).json({ error: 'emp_id and status required' })
 
-    const empRes  = await query('SELECT hourly_rate, station_code, salary FROM employees WHERE id=$1', [emp_id])
+    const empRes  = await query('SELECT hourly_rate, station_code FROM employees WHERE id=$1', [emp_id])
     const emp     = empRes.rows[0]
     const station = emp?.station_code || 'DDB1'
-    const basicSalary = parseFloat(emp?.salary || 0)
 
     let earnings = null
     let finalPayType = 'hourly'
@@ -42,11 +41,11 @@ router.post('/', auth, requireRole('admin','manager','general_manager','poc','ac
       if (station === 'DXE6') {
         finalPayType = 'shipment'
         storedUnits = shipments_returned != null ? parseInt(shipments_returned) : null
-        earnings = storedUnits != null ? Math.round((basicSalary + storedUnits * 0.5) * 100) / 100 : null
+        earnings = storedUnits != null ? Math.round(storedUnits * 0.5 * 100) / 100 : null
       } else {
         finalPayType = 'hourly'
         storedUnits = hours_worked != null ? parseFloat(hours_worked) : null
-        earnings = storedUnits != null ? Math.round((basicSalary + storedUnits * 3.85) * 100) / 100 : null
+        earnings = storedUnits != null ? Math.round(storedUnits * 3.85 * 100) / 100 : null
       }
     }
 
@@ -90,7 +89,7 @@ router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc'
     // Batch-fetch all employee data in one query instead of one per record
     const validEmpIds = [...new Set(records.filter(r => r.emp_id && r.status).map(r => r.emp_id))]
     const empRows = validEmpIds.length
-      ? await query('SELECT id, hourly_rate, station_code, salary FROM employees WHERE id = ANY($1::text[])', [validEmpIds])
+      ? await query('SELECT id, hourly_rate, station_code FROM employees WHERE id = ANY($1::text[])', [validEmpIds])
       : { rows: [] }
     const empMap = {}
     for (const e of empRows.rows) empMap[e.id] = e
@@ -101,7 +100,6 @@ router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc'
 
       const emp     = empMap[emp_id]
       const station = emp?.station_code || 'DDB1'
-      const basicSalary = parseFloat(emp?.salary || 0)
 
       let earnings = null
       let finalPayType = 'hourly'
@@ -111,11 +109,11 @@ router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc'
         if (station === 'DXE6') {
           finalPayType = 'shipment'
           storedUnits = shipments_returned != null ? parseInt(shipments_returned) : null
-          earnings = storedUnits != null ? Math.round((basicSalary + storedUnits * 0.5) * 100) / 100 : null
+          earnings = storedUnits != null ? Math.round(storedUnits * 0.5 * 100) / 100 : null
         } else {
           finalPayType = 'hourly'
           storedUnits = hours_worked != null ? parseFloat(hours_worked) : null
-          earnings = storedUnits != null ? Math.round((basicSalary + storedUnits * 3.85) * 100) / 100 : null
+          earnings = storedUnits != null ? Math.round(storedUnits * 3.85 * 100) / 100 : null
         }
       }
 
@@ -146,21 +144,20 @@ router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','
     const existing = await query('SELECT * FROM attendance WHERE id=$1', [req.params.id])
     if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' })
     const rec = existing.rows[0]
-    const empRes = await query('SELECT hourly_rate, station_code, salary FROM employees WHERE id=$1', [rec.emp_id])
+    const empRes = await query('SELECT hourly_rate, station_code FROM employees WHERE id=$1', [rec.emp_id])
     const emp = empRes.rows[0]
     const station = emp?.station_code || 'DDB1'
-    const basicSalary = parseFloat(emp?.salary || 0)
     const newStatus = status ?? rec.status
     let earnings = null, finalPayType = 'hourly', storedUnits = null
     if (newStatus === 'present') {
       if (station === 'DXE6') {
         finalPayType = 'shipment'
-        storedUnits = shipments_returned != null ? parseInt(shipments_returned) : (rec.pay_type === 'shipment' ? parseFloat(rec.cycle_hours) : null)
-        earnings = storedUnits != null ? Math.round((basicSalary + storedUnits * 0.5) * 100) / 100 : null
+        storedUnits = shipments_returned != null ? parseInt(shipments_returned) : (rec.cycle_hours != null ? parseFloat(rec.cycle_hours) : null)
+        earnings = storedUnits != null ? Math.round(storedUnits * 0.5 * 100) / 100 : null
       } else {
         finalPayType = 'hourly'
-        storedUnits = hours_worked != null ? parseFloat(hours_worked) : parseFloat(rec.cycle_hours ?? null)
-        earnings = storedUnits != null ? Math.round((basicSalary + storedUnits * 3.85) * 100) / 100 : null
+        storedUnits = hours_worked != null ? parseFloat(hours_worked) : (rec.cycle_hours != null ? parseFloat(rec.cycle_hours) : null)
+        earnings = storedUnits != null ? Math.round(storedUnits * 3.85 * 100) / 100 : null
       }
     }
     const result = await query(`
