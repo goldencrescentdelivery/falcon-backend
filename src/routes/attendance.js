@@ -39,7 +39,7 @@ router.post('/', auth, requireRole('admin','manager','general_manager','poc','ac
 
     if (status === 'present') {
       if (station === 'DXE6') {
-        finalPayType = 'shipment'
+        finalPayType = 'daily'
         storedUnits = shipments_returned != null ? parseInt(shipments_returned) : null
         earnings = storedUnits != null ? Math.round(storedUnits * 0.5 * 100) / 100 : null
       } else {
@@ -107,7 +107,7 @@ router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc'
 
       if (status === 'present') {
         if (station === 'DXE6') {
-          finalPayType = 'shipment'
+          finalPayType = 'daily'
           storedUnits = shipments_returned != null ? parseInt(shipments_returned) : null
           earnings = storedUnits != null ? Math.round(storedUnits * 0.5 * 100) / 100 : null
         } else {
@@ -151,7 +151,7 @@ router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','
     let earnings = null, finalPayType = 'hourly', storedUnits = null
     if (newStatus === 'present') {
       if (station === 'DXE6') {
-        finalPayType = 'shipment'
+        finalPayType = 'daily'
         storedUnits = shipments_returned != null ? parseInt(shipments_returned) : (rec.cycle_hours != null ? parseFloat(rec.cycle_hours) : null)
         earnings = storedUnits != null ? Math.round(storedUnits * 0.5 * 100) / 100 : null
       } else {

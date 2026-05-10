@@ -523,12 +523,6 @@ async function autoMigrate() {
     try { await query(sql) } catch(e) { console.warn('index:', e.message) }
   }
 
-  // attendance pay_type — add 'shipment' to constraint (station-based attendance v2)
-  try {
-    await query(`ALTER TABLE attendance DROP CONSTRAINT IF EXISTS attendance_pay_type_check`)
-    await query(`ALTER TABLE attendance ADD CONSTRAINT attendance_pay_type_check CHECK (pay_type IN ('hourly','daily','shipment'))`)
-  } catch(e) { console.warn('migrate attendance pay_type constraint:', e.message) }
-
   console.log('Auto-migration complete')
 }
 
