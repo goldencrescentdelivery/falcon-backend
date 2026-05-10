@@ -3,6 +3,24 @@ const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
 const V = require('../middleware/validate')
 
+// GET /api/vehicles/stats — aggregate counts only, used by overview (fast)
+router.get('/stats', auth, async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT
+        COUNT(*)                                         AS total,
+        COUNT(*) FILTER (WHERE status='active')          AS active,
+        COUNT(*) FILTER (WHERE status='grounded')        AS grounded,
+        COUNT(*) FILTER (WHERE status='maintenance')     AS maintenance,
+        COUNT(*) FILTER (WHERE station_code='DDB1')      AS ddb1,
+        COUNT(*) FILTER (WHERE station_code='DXE6')      AS dxe6
+      FROM vehicles
+    `)
+    res.set('Cache-Control', 'private, max-age=60')
+    res.json({ stats: result.rows[0] })
+  } catch (err) { res.status(500).json({ error: 'Server error' }) }
+})
+
 // GET /api/vehicles
 router.get('/', auth, async (req, res) => {
   try {

@@ -66,7 +66,13 @@ router.get('/verify/:id', async (req, res) => {
 // GET /api/letters
 router.get('/', auth, ALLOWED, async (req, res) => {
   try {
-    const result = await query(`SELECT * FROM office_letters ORDER BY created_at DESC`)
+    const { status, limit } = req.query
+    const vals = []
+    let sql = `SELECT * FROM office_letters`
+    if (status) { vals.push(status); sql += ` WHERE status = $${vals.length}` }
+    sql += ' ORDER BY created_at DESC'
+    if (limit) { vals.push(parseInt(limit) || 50); sql += ` LIMIT $${vals.length}` }
+    const result = await query(sql, vals)
     res.json({ letters: result.rows })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
