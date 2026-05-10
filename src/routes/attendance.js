@@ -3,8 +3,6 @@ const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
 const V = require('../middleware/validate')
 
-const CYCLE_HOURS = { A:5, B:4, C:5, Beset:5, MR:4, FM:5, Rescue:null }
-
 router.get('/', auth, async (req, res) => {
   try {
     const { date, emp_id, station_code } = req.query
@@ -28,30 +26,27 @@ router.get('/', auth, async (req, res) => {
 
 router.post('/', auth, requireRole('admin','manager','general_manager','poc','accountant'), async (req, res) => {
   try {
-    const { emp_id, date, check_in, check_out, status, note, cycle, cycle_hours, is_rescue, rescue_hours, pay_type, daily_rate, worker_type } = req.body
+    const { emp_id, date, check_in, check_out, status, note, hours_worked, shipments_returned } = req.body
     if (!emp_id || !status) return res.status(400).json({ error: 'emp_id and status required' })
 
-    const empRes  = await query('SELECT hourly_rate, station_code FROM employees WHERE id=$1', [emp_id])
+    const empRes  = await query('SELECT hourly_rate, station_code, salary FROM employees WHERE id=$1', [emp_id])
     const emp     = empRes.rows[0]
-    const station = emp?.station_code || 'DDB7'
+    const station = emp?.station_code || 'DDB1'
+    const basicSalary = parseFloat(emp?.salary || 0)
 
     let earnings = null
-    let finalPayType = pay_type || 'hourly'
-    let finalDailyRate = null
-    let hours = null
+    let finalPayType = 'hourly'
+    let storedUnits = null
 
     if (status === 'present') {
-      if (station === 'DDB6') {
-        // DDB6: daily rate — driver AED 115, helper AED 90
-        finalPayType   = 'daily'
-        finalDailyRate = daily_rate || (worker_type === 'helper' ? 90 : 115)
-        earnings       = finalDailyRate
+      if (station === 'DXE6') {
+        finalPayType = 'shipment'
+        storedUnits = shipments_returned != null ? parseInt(shipments_returned) : null
+        earnings = storedUnits != null ? Math.round((basicSalary + storedUnits * 0.5) * 100) / 100 : null
       } else {
-        // DDB7/DSH6/DXD3: hourly
-        const rate = emp?.hourly_rate || 3.85
-        hours = cycle_hours != null ? parseFloat(cycle_hours) : (cycle ? CYCLE_HOURS[cycle] : null)
-        if (is_rescue && rescue_hours) hours = parseFloat(rescue_hours)
-        earnings = hours != null ? Math.round(hours * rate * 100) / 100 : null
+        finalPayType = 'hourly'
+        storedUnits = hours_worked != null ? parseFloat(hours_worked) : null
+        earnings = storedUnits != null ? Math.round((basicSalary + storedUnits * 3.85) * 100) / 100 : null
       }
     }
 
@@ -64,9 +59,9 @@ router.post('/', auth, requireRole('admin','manager','general_manager','poc','ac
         worker_type=$16,updated_at=NOW()
       RETURNING *`,
       [emp_id, date||new Date().toISOString().slice(0,10), check_in||null, check_out||null,
-       status, note||null, req.user.id, cycle||null, hours,
-       emp?.hourly_rate||null, earnings, is_rescue||false, rescue_hours||null,
-       finalPayType, finalDailyRate, worker_type||'driver'])
+       status, note||null, req.user.id, null, storedUnits,
+       emp?.hourly_rate||null, earnings, false, null,
+       finalPayType, null, null])
 
     req.io?.emit('attendance:updated', result.rows[0])
     res.json({ attendance: result.rows[0] })
@@ -95,33 +90,32 @@ router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc'
     // Batch-fetch all employee data in one query instead of one per record
     const validEmpIds = [...new Set(records.filter(r => r.emp_id && r.status).map(r => r.emp_id))]
     const empRows = validEmpIds.length
-      ? await query('SELECT id, hourly_rate, station_code FROM employees WHERE id = ANY($1::text[])', [validEmpIds])
+      ? await query('SELECT id, hourly_rate, station_code, salary FROM employees WHERE id = ANY($1::text[])', [validEmpIds])
       : { rows: [] }
     const empMap = {}
     for (const e of empRows.rows) empMap[e.id] = e
 
     for (const rec of records) {
-      const { emp_id, date, status, cycle, cycle_hours, is_rescue, rescue_hours, note, pay_type, daily_rate, worker_type } = rec
+      const { emp_id, date, status, note, hours_worked, shipments_returned } = rec
       if (!emp_id || !status) continue
 
       const emp     = empMap[emp_id]
-      const station = emp?.station_code || 'DDB7'
+      const station = emp?.station_code || 'DDB1'
+      const basicSalary = parseFloat(emp?.salary || 0)
 
       let earnings = null
-      let finalPayType   = pay_type || 'hourly'
-      let finalDailyRate = null
-      let hours = null
+      let finalPayType = 'hourly'
+      let storedUnits = null
 
       if (status === 'present') {
-        if (station === 'DDB6') {
-          finalPayType   = 'daily'
-          finalDailyRate = daily_rate || (worker_type === 'helper' ? 90 : 115)
-          earnings       = finalDailyRate
+        if (station === 'DXE6') {
+          finalPayType = 'shipment'
+          storedUnits = shipments_returned != null ? parseInt(shipments_returned) : null
+          earnings = storedUnits != null ? Math.round((basicSalary + storedUnits * 0.5) * 100) / 100 : null
         } else {
-          const rate = emp?.hourly_rate || 3.85
-          hours = cycle_hours != null ? parseFloat(cycle_hours) : (cycle ? { A:5,B:4,C:5,Beset:5,MR:4,FM:5 }[cycle] : null)
-          if (is_rescue && rescue_hours) hours = parseFloat(rescue_hours)
-          earnings = hours != null ? Math.round(hours * rate * 100) / 100 : null
+          finalPayType = 'hourly'
+          storedUnits = hours_worked != null ? parseFloat(hours_worked) : null
+          earnings = storedUnits != null ? Math.round((basicSalary + storedUnits * 3.85) * 100) / 100 : null
         }
       }
 
@@ -134,8 +128,8 @@ router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc'
           worker_type=$14,updated_at=NOW()
         RETURNING *`,
         [emp_id, date||new Date().toISOString().slice(0,10), status, note||null, req.user.id,
-         cycle||null, hours, emp?.hourly_rate||null, earnings, is_rescue||false, rescue_hours||null,
-         finalPayType, finalDailyRate, worker_type||'driver'])
+         null, storedUnits, emp?.hourly_rate||null, earnings, false, null,
+         finalPayType, null, null])
 
       results.push(r.rows[0])
       req.io?.emit('attendance:updated', r.rows[0])
@@ -148,26 +142,25 @@ router.post('/bulk', auth, requireRole('admin','manager','general_manager','poc'
 // PUT /api/attendance/:id — edit an existing record (recomputes earnings)
 router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','accountant'), async (req, res) => {
   try {
-    const { status, note, cycle, cycle_hours, is_rescue, rescue_hours, pay_type, daily_rate, worker_type } = req.body
+    const { status, note, hours_worked, shipments_returned } = req.body
     const existing = await query('SELECT * FROM attendance WHERE id=$1', [req.params.id])
     if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' })
     const rec = existing.rows[0]
-    const empRes = await query('SELECT hourly_rate, station_code FROM employees WHERE id=$1', [rec.emp_id])
+    const empRes = await query('SELECT hourly_rate, station_code, salary FROM employees WHERE id=$1', [rec.emp_id])
     const emp = empRes.rows[0]
-    const station = emp?.station_code || 'DDB7'
+    const station = emp?.station_code || 'DDB1'
+    const basicSalary = parseFloat(emp?.salary || 0)
     const newStatus = status ?? rec.status
-    let earnings = null, hours = null, finalPayType = pay_type ?? rec.pay_type, finalDailyRate = null
+    let earnings = null, finalPayType = 'hourly', storedUnits = null
     if (newStatus === 'present') {
-      if (station === 'DDB6') {
-        finalPayType   = 'daily'
-        finalDailyRate = daily_rate ?? (worker_type === 'helper' ? 90 : 115)
-        earnings       = finalDailyRate
+      if (station === 'DXE6') {
+        finalPayType = 'shipment'
+        storedUnits = shipments_returned != null ? parseInt(shipments_returned) : (rec.pay_type === 'shipment' ? parseFloat(rec.cycle_hours) : null)
+        earnings = storedUnits != null ? Math.round((basicSalary + storedUnits * 0.5) * 100) / 100 : null
       } else {
-        const rate = emp?.hourly_rate || 3.85
-        hours = cycle_hours != null ? parseFloat(cycle_hours) : rec.cycle_hours
-        if ((is_rescue ?? rec.is_rescue) && (rescue_hours ?? rec.rescue_hours))
-          hours = parseFloat(rescue_hours ?? rec.rescue_hours)
-        earnings = hours != null ? Math.round(hours * rate * 100) / 100 : null
+        finalPayType = 'hourly'
+        storedUnits = hours_worked != null ? parseFloat(hours_worked) : parseFloat(rec.cycle_hours ?? null)
+        earnings = storedUnits != null ? Math.round((basicSalary + storedUnits * 3.85) * 100) / 100 : null
       }
     }
     const result = await query(`
@@ -176,9 +169,9 @@ router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','
         earnings=$5, is_rescue=$6, rescue_hours=$7,
         pay_type=$8, daily_rate=$9, worker_type=$10, updated_at=NOW()
       WHERE id=$11 RETURNING *`,
-      [newStatus, note ?? rec.note, cycle ?? rec.cycle, hours,
-       earnings, is_rescue ?? rec.is_rescue, rescue_hours ?? rec.rescue_hours,
-       finalPayType, finalDailyRate, worker_type ?? rec.worker_type,
+      [newStatus, note ?? rec.note, null, storedUnits,
+       earnings, false, null,
+       finalPayType, null, null,
        req.params.id])
     req.io?.emit('attendance:updated', result.rows[0])
     res.json({ attendance: result.rows[0] })
