@@ -107,6 +107,7 @@ app.use('/api/office',         require('./routes/office'))
 app.use('/api/letters',        require('./routes/letters'))
 app.use('/api/notifications',  require('./routes/notifications'))
 app.use('/api/tasks',          require('./routes/tasks'))
+app.use('/api/customers',      require('./routes/customers'))
 
 
 // ── Health check ───────────────────────────────────────────────
@@ -297,6 +298,34 @@ async function autoMigrate() {
     await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS last_reminder_sent_at TIMESTAMPTZ`)
     await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ`)
   } catch(e) { console.warn('migrate tasks:', e.message) }
+
+  // customers table
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS customers (
+        id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name             TEXT NOT NULL,
+        address          TEXT,
+        trn_no           TEXT,
+        opening_balance  NUMERIC DEFAULT 0,
+        customer_type    TEXT DEFAULT 'sale_invoice',
+        cost_center      TEXT,
+        ncod_rate        NUMERIC,
+        cod_rate         NUMERIC,
+        rp_rate          NUMERIC,
+        pickup_rate      NUMERIC,
+        ncod_inv_rate    NUMERIC,
+        cod_inv_rate     NUMERIC,
+        rp_inv_rate      NUMERIC,
+        pickup_inv_rate  NUMERIC,
+        notes            TEXT,
+        created_by       UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at       TIMESTAMPTZ DEFAULT NOW(),
+        updated_at       TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    await query(`CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name)`)
+  } catch(e) { console.warn('migrate customers:', e.message) }
 
   // vehicle_handovers — two-actor flow columns (migrate18)
   try {
