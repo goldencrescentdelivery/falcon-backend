@@ -107,8 +107,9 @@ app.use('/api/office',         require('./routes/office'))
 app.use('/api/letters',        require('./routes/letters'))
 app.use('/api/notifications',  require('./routes/notifications'))
 app.use('/api/tasks',          require('./routes/tasks'))
-app.use('/api/customers',         require('./routes/customers'))
-app.use('/api/customer-invoices', require('./routes/customer-invoices'))
+app.use('/api/customers',          require('./routes/customers'))
+app.use('/api/customer-invoices',  require('./routes/customer-invoices'))
+app.use('/api/customer-receipts',  require('./routes/customer-receipts'))
 
 
 // ── Health check ───────────────────────────────────────────────
@@ -348,6 +349,24 @@ async function autoMigrate() {
     `)
     await query(`CREATE INDEX IF NOT EXISTS idx_cust_inv_customer ON customer_invoices(customer_id, invoice_date DESC)`)
   } catch(e) { console.warn('migrate customer_invoices:', e.message) }
+
+  // customer_receipts table
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS customer_receipts (
+        id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        customer_id  UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        receipt_date DATE NOT NULL,
+        cost_center  TEXT,
+        description  TEXT,
+        credit       NUMERIC NOT NULL DEFAULT 0,
+        created_by   UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at   TIMESTAMPTZ DEFAULT NOW(),
+        updated_at   TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    await query(`CREATE INDEX IF NOT EXISTS idx_cust_rec_customer ON customer_receipts(customer_id, receipt_date DESC)`)
+  } catch(e) { console.warn('migrate customer_receipts:', e.message) }
 
   // vehicle_handovers — two-actor flow columns (migrate18)
   try {
