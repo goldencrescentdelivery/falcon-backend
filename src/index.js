@@ -110,6 +110,7 @@ app.use('/api/tasks',          require('./routes/tasks'))
 app.use('/api/customers',          require('./routes/customers'))
 app.use('/api/customer-invoices',  require('./routes/customer-invoices'))
 app.use('/api/customer-receipts',  require('./routes/customer-receipts'))
+app.use('/api/customer-ledger',    require('./routes/customer-ledger'))
 
 
 // ── Health check ───────────────────────────────────────────────
