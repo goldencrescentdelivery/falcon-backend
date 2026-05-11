@@ -35,7 +35,9 @@ router.post('/', auth, ALLOWED, async (req, res) => {
       return res.status(400).json({ error: 'customer_id, invoice_date, and invoice_amount are required' })
 
     const amt   = parseFloat(invoice_amount)
-    const vatAmt = vat != null ? parseFloat(vat) : Math.round(amt * 5) / 100
+    const custResult = await query('SELECT trn_no FROM customers WHERE id=$1', [customer_id])
+    const hasTrn = !!custResult.rows[0]?.trn_no
+    const vatAmt = vat != null ? parseFloat(vat) : (hasTrn ? Math.round(amt * 5) / 100 : 0)
     const grand  = grand_total != null ? parseFloat(grand_total) : amt + vatAmt
 
     const result = await query(`
@@ -57,7 +59,9 @@ router.put('/:id', auth, ALLOWED, async (req, res) => {
       return res.status(400).json({ error: 'invoice_date and invoice_amount are required' })
 
     const amt    = parseFloat(invoice_amount)
-    const vatAmt = vat != null ? parseFloat(vat) : Math.round(amt * 5) / 100
+    const custLookup = await query('SELECT c.trn_no FROM customers c JOIN customer_invoices ci ON ci.customer_id=c.id WHERE ci.id=$1', [req.params.id])
+    const hasTrn2 = !!custLookup.rows[0]?.trn_no
+    const vatAmt = vat != null ? parseFloat(vat) : (hasTrn2 ? Math.round(amt * 5) / 100 : 0)
     const grand  = grand_total != null ? parseFloat(grand_total) : amt + vatAmt
 
     const result = await query(`
