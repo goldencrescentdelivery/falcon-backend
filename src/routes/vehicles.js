@@ -39,7 +39,7 @@ router.get('/', auth, async (req, res) => {
 })
 
 // POST /api/vehicles
-router.post('/', auth, V.validateVehicle, requireRole('admin','manager','poc'), async (req, res) => {
+router.post('/', auth, V.validateVehicle, requireRole('admin','general_manager','manager','poc'), async (req, res) => {
   try {
     const { plate, make, model, year, station_code, status, grounded_reason, grounded_since, grounded_until, notes } = req.body
     if (!plate) return res.status(400).json({ error: 'Plate number required' })
@@ -57,7 +57,7 @@ router.post('/', auth, V.validateVehicle, requireRole('admin','manager','poc'), 
 })
 
 // PUT /api/vehicles/:id
-router.put('/:id', auth, V.validateParams({ id: 'uuid' }), V.validateVehicle, requireRole('admin','manager','poc'), async (req, res) => {
+router.put('/:id', auth, V.validateParams({ id: 'uuid' }), V.validateVehicle, requireRole('admin','general_manager','manager','poc'), async (req, res) => {
   try {
     const { plate, make, model, year, station_code, status, grounded_reason, grounded_since, grounded_until, notes } = req.body
     const result = await query(`
@@ -71,7 +71,7 @@ router.put('/:id', auth, V.validateParams({ id: 'uuid' }), V.validateVehicle, re
 })
 
 // DELETE /api/vehicles/:id
-router.delete('/:id', auth, requireRole('admin','manager','poc'), async (req, res) => {
+router.delete('/:id', auth, requireRole('admin','general_manager','manager'), async (req, res) => {
   try {
     await query('DELETE FROM vehicles WHERE id=$1', [req.params.id])
     res.json({ message: 'Vehicle deleted' })
@@ -200,7 +200,7 @@ router.get('/assignments/history', auth, async (req, res) => {
 })
 
 // POST /api/vehicles/assignments
-router.post('/assignments', auth, requireRole('admin','manager','poc'), async (req, res) => {
+router.post('/assignments', auth, requireRole('admin','general_manager','manager','poc'), async (req, res) => {
   try {
     const { vehicle_id, emp_id, date, station_code, notes } = req.body
     // Only DAs (Driver role) can be assigned to vehicles
