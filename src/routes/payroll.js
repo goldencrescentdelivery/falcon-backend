@@ -108,6 +108,17 @@ router.post('/deductions', auth, V.validatePayrollDeduction, requireRole('admin'
       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *
     `, [emp_id, month, type, amount, description||null, reference||null, req.user.id])
 
+    // Mirror to expenses for financial tracking (non-fatal)
+    try {
+      const dedId = result.rows[0].id
+      const typeLabels = { traffic_fine:'Traffic Fine', iloe_fee:'ILOE Fee', iloe_fine:'ILOE Fine', cash_variance:'Cash Variance', other:'Other' }
+      const expDesc = `Payroll Deduction: ${typeLabels[type]||type}${description?' - '+description:''} [ref:${dedId}]`
+      await query(`
+        INSERT INTO expenses (emp_id, category, amount, date, description, status)
+        VALUES ($1,'Miscellaneous Expenses',$2,$3,$4,'approved')
+      `, [emp_id, amount, month + '-01', expDesc])
+    } catch(e) { /* non-fatal */ }
+
     req.io?.emit('payroll:deduction_added', { deduction: result.rows[0], emp_id, month })
     res.status(201).json({ deduction: result.rows[0] })
   } catch (err) {
@@ -120,6 +131,8 @@ router.delete('/deductions/:id', auth, requireRole('admin','accountant'), async 
   try {
     const result = await query('DELETE FROM salary_deductions WHERE id=$1 RETURNING *', [req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
+    // Remove mirrored expense (non-fatal)
+    try { await query(`DELETE FROM expenses WHERE description LIKE $1`, [`%[ref:${req.params.id}]%`]) } catch(e) {}
     req.io?.emit('payroll:deduction_removed', result.rows[0])
     res.json({ message: 'Deduction removed' })
   } catch (err) {
@@ -138,6 +151,16 @@ router.post('/bonuses', auth, V.validatePayrollBonus, requireRole('admin','manag
       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *
     `, [emp_id, month, type, amount, description||null, req.user.id])
 
+    // Mirror to expenses for financial tracking (non-fatal)
+    try {
+      const bonusId = result.rows[0].id
+      const expDesc = `Payroll Bonus: ${description || type} [ref:${bonusId}]`
+      await query(`
+        INSERT INTO expenses (emp_id, category, amount, date, description, status)
+        VALUES ($1,'Miscellaneous Expenses',$2,$3,$4,'approved')
+      `, [emp_id, amount, month + '-01', expDesc])
+    } catch(e) { /* non-fatal */ }
+
     req.io?.emit('payroll:bonus_added', { bonus: result.rows[0], emp_id, month })
     res.status(201).json({ bonus: result.rows[0] })
   } catch (err) {
@@ -150,6 +173,8 @@ router.delete('/bonuses/:id', auth, requireRole('admin','accountant'), async (re
   try {
     const result = await query('DELETE FROM salary_bonuses WHERE id=$1 RETURNING *', [req.params.id])
     if (!result.rows[0]) return res.status(404).json({ error: 'Not found' })
+    // Remove mirrored expense (non-fatal)
+    try { await query(`DELETE FROM expenses WHERE description LIKE $1`, [`%[ref:${req.params.id}]%`]) } catch(e) {}
     req.io?.emit('payroll:bonus_removed', result.rows[0])
     res.json({ message: 'Bonus removed' })
   } catch (err) {
@@ -196,6 +221,22 @@ router.post('/mark-paid', auth, requireRole('admin','accountant'), async (req, r
 
     req.io?.emit('payroll:paid', payrollRecord)
     res.json({ payroll: payrollRecord })
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// POST /api/payroll/mark-unpaid — revert a paid record back to pending
+router.post('/mark-unpaid', auth, requireRole('admin','accountant'), async (req, res) => {
+  try {
+    const { emp_id, month } = req.body
+    if (!emp_id || !month) return res.status(400).json({ error: 'emp_id and month required' })
+    await query(
+      `UPDATE payroll SET status='pending', paid_on=NULL WHERE emp_id=$1 AND month=$2`,
+      [emp_id, month]
+    )
+    req.io?.emit('payroll:updated', { emp_id, month, status: 'pending' })
+    res.json({ message: 'Marked as unpaid' })
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Server error' })
   }
