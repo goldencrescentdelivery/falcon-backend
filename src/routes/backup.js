@@ -1,7 +1,20 @@
-const router = require('express').Router()
+const router  = require('express').Router()
+const multer  = require('multer')
 const { query } = require('../db/pool')
-const { createBackup } = require('../db/backup')
+const { createBackup, restoreBackup } = require('../db/backup')
 const { auth, requireRole } = require('../middleware/auth')
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB max
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/json' || file.originalname.endsWith('.json')) {
+      cb(null, true)
+    } else {
+      cb(new Error('Only .json backup files are accepted'))
+    }
+  },
+})
 
 // GET /api/backup/download — download full JSON backup
 router.get('/download', auth, requireRole('admin'), async (req, res) => {
@@ -48,6 +61,37 @@ router.get('/stats', auth, requireRole('admin'), async (req, res) => {
     })
   } catch (err) {
     res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// POST /api/backup/restore — upload a backup JSON file and restore all tables
+router.post('/restore', auth, requireRole('admin'), upload.single('backup'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No backup file uploaded' })
+
+  let backupData
+  try {
+    backupData = JSON.parse(req.file.buffer.toString('utf8'))
+  } catch {
+    return res.status(400).json({ error: 'Invalid JSON — file could not be parsed' })
+  }
+
+  if (!backupData.tables) {
+    return res.status(400).json({ error: 'Invalid backup format: missing tables field' })
+  }
+
+  try {
+    console.log(`🔄 Restore started by ${req.user.name}`)
+    const result = await restoreBackup(backupData, req.user.id)
+    console.log(`✅ Restore complete — ${result.totalRows} rows restored`)
+    res.json({
+      message: 'Restore completed successfully',
+      totalRows: result.totalRows,
+      tablesRestored: result.tablesRestored,
+      summary: result.summary,
+    })
+  } catch (err) {
+    console.error('Restore failed:', err)
+    res.status(500).json({ error: 'Restore failed: ' + err.message })
   }
 })
 
