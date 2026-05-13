@@ -255,4 +255,29 @@ router.get('/status', auth, (_req, res) => {
   })
 })
 
+// GET /api/etisalat/ping — one-shot connectivity probe (clears backoff, makes real request)
+// Useful for diagnosing Railway → ThingWorx network reachability
+router.get('/ping', auth, async (_req, res) => {
+  const start = Date.now()
+  // Clear backoff so this is always a live attempt
+  _loginFailedAt = 0
+  try {
+    const r = await timeoutFetch(`${TW_BASE()}/Thingworx/FormLogin`, { method: 'HEAD' }, 5000)
+    res.json({
+      reachable: true,
+      http_status: r.status,
+      ms: Date.now() - start,
+      base: TW_BASE(),
+    })
+  } catch (err) {
+    res.json({
+      reachable: false,
+      error:     err.message,
+      code:      err.cause?.code || null,
+      ms:        Date.now() - start,
+      base:      TW_BASE(),
+    })
+  }
+})
+
 module.exports = router
