@@ -43,13 +43,18 @@ router.get('/', auth, async (req, res) => {
 // POST /api/vehicles
 router.post('/', auth, V.validateVehicle, requireRole('admin','general_manager','manager','poc'), async (req, res) => {
   try {
-    const { plate, make, model, year, station_code, status, grounded_reason, grounded_since, grounded_until, notes } = req.body
+    const { plate, make, model, year, station_code, status, grounded_reason, grounded_since, grounded_until, notes,
+            vin, ownership_type, vehicle_provider, ownership_start, ownership_end, service_tier } = req.body
     if (!plate) return res.status(400).json({ error: 'Plate number required' })
-    const sc = req.user.role === 'poc' ? req.user.station_code : (station_code || 'DDB7')
+    const sc = req.user.role === 'poc' ? req.user.station_code : (station_code || 'DDB6')
     const result = await query(`
-      INSERT INTO vehicles (plate,make,model,year,station_code,status,grounded_reason,grounded_since,grounded_until,notes)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *
-    `, [plate.toUpperCase(), make||null, model||null, year||null, sc, status||'active', grounded_reason||null, grounded_since||null, grounded_until||null, notes||null])
+      INSERT INTO vehicles (plate,make,model,year,station_code,status,grounded_reason,grounded_since,grounded_until,notes,
+        vin,ownership_type,vehicle_provider,ownership_start,ownership_end,service_tier)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *
+    `, [plate.toUpperCase(), make||null, model||null, year||null, sc, status||'active',
+        grounded_reason||null, grounded_since||null, grounded_until||null, notes||null,
+        vin||null, ownership_type||null, vehicle_provider||null,
+        ownership_start||null, ownership_end||null, service_tier||null])
     req.io?.emit('vehicle:created', result.rows[0])
     res.status(201).json({ vehicle: result.rows[0] })
   } catch (err) {
@@ -58,15 +63,72 @@ router.post('/', auth, V.validateVehicle, requireRole('admin','general_manager',
   }
 })
 
+// POST /api/vehicles/bulk — import multiple vehicles from CSV upload
+router.post('/bulk', auth, requireRole('admin','general_manager','manager'), async (req, res) => {
+  try {
+    const { vehicles } = req.body
+    if (!Array.isArray(vehicles) || vehicles.length === 0)
+      return res.status(400).json({ error: 'vehicles array required' })
+    if (vehicles.length > 500)
+      return res.status(400).json({ error: 'Maximum 500 vehicles per import' })
+
+    const results = { inserted: 0, skipped: 0, errors: [] }
+
+    for (const v of vehicles) {
+      const plate = (v.plate || v.licensePlateNumber || '').toString().trim().toUpperCase()
+      if (!plate) { results.errors.push({ plate:'(blank)', reason:'Missing plate' }); continue }
+
+      const sc = (v.station_code || v.stationCode || 'DDB6').toString().trim()
+      const yr = v.year ? parseInt(v.year) : null
+
+      try {
+        await query(`
+          INSERT INTO vehicles (plate,make,model,year,station_code,status,notes,
+            vin,ownership_type,vehicle_provider,ownership_start,ownership_end,service_tier)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+          ON CONFLICT (plate) DO NOTHING
+        `, [
+          plate,
+          v.make || v.vehicleName || null,
+          v.model || null,
+          yr,
+          sc,
+          'active',
+          v.notes || null,
+          v.vin || null,
+          v.ownership_type || v.type || null,
+          v.vehicle_provider || v.vehicleProvider || null,
+          v.ownership_start || v.ownershipStartDate || null,
+          v.ownership_end   || v.ownershipEndDate   || null,
+          v.service_tier    || v.serviceTier        || null,
+        ])
+        results.inserted++
+      } catch(e) {
+        results.errors.push({ plate, reason: e.message })
+        results.skipped++
+      }
+    }
+
+    res.json({ ok: true, ...results })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
 // PUT /api/vehicles/:id
 router.put('/:id', auth, V.validateParams({ id: 'uuid' }), V.validateVehicle, requireRole('admin','general_manager','manager','poc'), async (req, res) => {
   try {
-    const { plate, make, model, year, station_code, status, grounded_reason, grounded_since, grounded_until, notes } = req.body
+    const { plate, make, model, year, station_code, status, grounded_reason, grounded_since, grounded_until, notes,
+            vin, ownership_type, vehicle_provider, ownership_start, ownership_end, service_tier } = req.body
     const result = await query(`
       UPDATE vehicles SET plate=$1,make=$2,model=$3,year=$4,station_code=$5,status=$6,
-        grounded_reason=$7,grounded_since=$8,grounded_until=$9,notes=$10,updated_at=NOW()
-      WHERE id=$11 RETURNING *
-    `, [plate?.toUpperCase(), make||null, model||null, year||null, station_code, status, grounded_reason||null, grounded_since||null, grounded_until||null, notes||null, req.params.id])
+        grounded_reason=$7,grounded_since=$8,grounded_until=$9,notes=$10,
+        vin=$11,ownership_type=$12,vehicle_provider=$13,ownership_start=$14,ownership_end=$15,service_tier=$16,
+        updated_at=NOW()
+      WHERE id=$17 RETURNING *
+    `, [plate?.toUpperCase(), make||null, model||null, year||null, station_code, status,
+        grounded_reason||null, grounded_since||null, grounded_until||null, notes||null,
+        vin||null, ownership_type||null, vehicle_provider||null,
+        ownership_start||null, ownership_end||null, service_tier||null,
+        req.params.id])
     req.io?.emit('vehicle:updated', result.rows[0])
     res.json({ vehicle: result.rows[0] })
   } catch (err) { res.status(500).json({ error: 'Server error' }) }
