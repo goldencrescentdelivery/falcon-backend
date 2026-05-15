@@ -127,7 +127,7 @@ router.put('/:id', auth, requireRole('admin','manager','general_manager','poc','
         project_type=$37,per_shipment_rate=$38,performance_bonus=$39,visa_type=$40,updated_at=NOW()
       WHERE id=$41 RETURNING *`,
       [name,role,dept,status,Number(salary)||0,sd(joined),phone||null,nationality||null,zone||null,
-       sd(visa_expiry),sd(license_expiry),avatar||'👤',station||null,station_code||'DDB1',
+       sd(visa_expiry),sd(license_expiry),avatar||'👤',station||null,station_code||'DDB6',
        Number(hourly_rate)||3.85,sd(iloe_expiry),sd(annual_leave_start),amazon_id||null,
        emirates_id||null,Number(annual_leave_balance)||30,
        sub_group_name||null,beneficiary_first_name||null,beneficiary_middle_name||null,

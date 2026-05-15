@@ -28,7 +28,7 @@ router.get('/', auth, async (req, res) => {
 router.post('/', auth, V.validateShift, requireRole('admin','manager','general_manager','poc'), async (req, res) => {
   try {
     const { emp_id, shift_date, shift_type, cycle, notes, station_code } = req.body
-    const sc = req.user.role === 'poc' ? req.user.station_code : (station_code || 'DDB1')
+    const sc = req.user.role === 'poc' ? req.user.station_code : (station_code || 'DDB6')
     const result = await query(`
       INSERT INTO shifts (emp_id, station_code, shift_date, shift_type, cycle, notes, assigned_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7)

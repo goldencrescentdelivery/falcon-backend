@@ -12,7 +12,7 @@ router.get('/', auth, async (req, res) => {
     if (from)    { vals.push(from); sql += ` AND d.date >= $${vals.length}` }
     if (to)      { vals.push(to);   sql += ` AND d.date <= $${vals.length}` }
     if (req.user.role === 'poc') {
-      const sc = req.user.station_code || 'DDB1'
+      const sc = req.user.station_code || 'DDB6'
       vals.push(sc); sql += ` AND d.station_code=$${vals.length}`
     }
     sql += ' ORDER BY d.date DESC'
@@ -58,9 +58,9 @@ router.post('/', auth, requireRole('admin','manager','poc'), async (req, res) =>
     // Always resolve station_code — never allow null
     let sc = station_code
     if (req.user.role === 'poc') {
-      sc = req.user.station_code || 'DDB1'
+      sc = req.user.station_code || 'DDB6'
     }
-    if (!sc) sc = 'DDB1'
+    if (!sc) sc = 'DDB6'
 
     const result = await query(`
       INSERT INTO daily_deliveries (station_code, date, total, attempted, successful, returned, notes, logged_by)
@@ -83,7 +83,7 @@ router.put('/:id', auth, requireRole('admin','manager','poc'), async (req, res) 
     const vals = [total, attempted||0, successful||0, returned||0, notes||null]
     // POC can only edit their own station's records
     if (req.user.role === 'poc') {
-      vals.push(req.params.id, req.user.station_code || 'DDB1')
+      vals.push(req.params.id, req.user.station_code || 'DDB6')
       sql += ` WHERE id=$6 AND station_code=$7 RETURNING *`
     } else {
       vals.push(req.params.id)
@@ -103,7 +103,7 @@ router.delete('/:id', auth, requireRole('admin','manager','poc'), async (req, re
     if (req.user.role === 'poc') {
       // POC can only delete their own station's records
       sql  = `DELETE FROM daily_deliveries WHERE id=$1 AND station_code=$2 RETURNING id`
-      vals = [req.params.id, req.user.station_code || 'DDB1']
+      vals = [req.params.id, req.user.station_code || 'DDB6']
     } else {
       sql  = `DELETE FROM daily_deliveries WHERE id=$1 RETURNING id`
       vals = [req.params.id]

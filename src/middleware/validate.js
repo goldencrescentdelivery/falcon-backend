@@ -93,7 +93,7 @@ function email(val) {
 
 // ── Allowed value sets ────────────────────────────────────────
 const ROLES          = ['admin','manager','general_manager','hr','accountant','poc','driver']
-const STATIONS       = ['DDB1','DXE6']
+const STATIONS       = ['DDB6','DDB7','DSH6','DXD3']
 const STATUSES       = ['active','inactive']
 const LEAVE_TYPES    = ['Annual','Sick','Emergency','Unpaid','Other']
 const LEAVE_STATUSES = ['pending','approved','rejected']

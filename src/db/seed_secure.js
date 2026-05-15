@@ -48,8 +48,10 @@ async function seed() {
     // ── Create POC accounts ───────────────────────────────────
     const pocHash = await hash(POC_PWD)
     const pocs = [
-      { email:'poc.ddb1@falconfastdelivery.com', name:'POC DDB1', station:'DDB1' },
-      { email:'poc.dxe6@falconfastdelivery.com', name:'POC DXE6', station:'DXE6' },
+      { email:'poc.ddb6@falconfastdelivery.com', name:'POC DDB6', station:'DDB6' },
+      { email:'poc.ddb7@falconfastdelivery.com', name:'POC DDB7', station:'DDB7' },
+      { email:'poc.dsh6@falconfastdelivery.com', name:'POC DSH6', station:'DSH6' },
+      { email:'poc.dxd3@falconfastdelivery.com', name:'POC DXD3', station:'DXD3' },
     ]
     for (const poc of pocs) {
       await client.query(`

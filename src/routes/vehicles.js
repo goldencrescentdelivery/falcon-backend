@@ -12,8 +12,10 @@ router.get('/stats', auth, async (req, res) => {
         COUNT(*) FILTER (WHERE status='active')          AS active,
         COUNT(*) FILTER (WHERE status='grounded')        AS grounded,
         COUNT(*) FILTER (WHERE status='maintenance')     AS maintenance,
-        COUNT(*) FILTER (WHERE station_code='DDB1')      AS ddb1,
-        COUNT(*) FILTER (WHERE station_code='DXE6')      AS dxe6
+        COUNT(*) FILTER (WHERE station_code='DDB6')      AS ddb6,
+        COUNT(*) FILTER (WHERE station_code='DDB7')      AS ddb7,
+        COUNT(*) FILTER (WHERE station_code='DSH6')      AS dsh6,
+        COUNT(*) FILTER (WHERE station_code='DXD3')      AS dxd3
       FROM vehicles
     `)
     res.set('Cache-Control', 'private, max-age=60')
