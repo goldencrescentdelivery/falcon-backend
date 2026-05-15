@@ -28,8 +28,7 @@ app.set('trust proxy', 1)
 
 // ── CORS origins ───────────────────────────────────────────────
 const CORS_ORIGINS = [
-  'https://fms.goldencrescent.ae',
-  'https://gcd-frontend-kappa.vercel.app',
+  'https://fms.falconfastdelivery.com',
   ...(process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
     : []),
