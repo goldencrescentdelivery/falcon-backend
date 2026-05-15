@@ -42,14 +42,14 @@ async function seed() {
         password_hash = $2,
         status = 'active',
         updated_at = NOW()
-    `, ['admin@goldencrescent.ae', adminHash])
-    console.log('  ✓ Admin account: admin@goldencrescent.ae')
+    `, ['admin@falconfastdelivery.com', adminHash])
+    console.log('  ✓ Admin account: admin@falconfastdelivery.com')
 
     // ── Create POC accounts ───────────────────────────────────
     const pocHash = await hash(POC_PWD)
     const pocs = [
-      { email:'poc.ddb1@goldencrescent.ae', name:'POC DDB1', station:'DDB1' },
-      { email:'poc.dxe6@goldencrescent.ae', name:'POC DXE6', station:'DXE6' },
+      { email:'poc.ddb1@falconfastdelivery.com', name:'POC DDB1', station:'DDB1' },
+      { email:'poc.dxe6@falconfastdelivery.com', name:'POC DXE6', station:'DXE6' },
     ]
     for (const poc of pocs) {
       await client.query(`
