@@ -98,8 +98,12 @@ router.get('/fleet', auth, async (_req, res) => {
       if (ct) matched[row.id] = ct
     }
 
+    // Find which Cartrack registrations didn't match any DB vehicle
+    const matchedCtIds = new Set(Object.values(matched).map(ct => ct.vehicle_id))
+    const unmatched = vehicles.filter(v => !matchedCtIds.has(v.vehicle_id))
+
     console.log(`[cartrack] ${vehicles.length} CT vehicles, ${Object.keys(matched).length}/${dbRows.rows.length} DB matched`)
-    console.log('[cartrack] registrations:', vehicles.map(v => v.registration).join(', '))
+    if (unmatched.length) console.log('[cartrack] unmatched CT plates (not in DB):', unmatched.map(v => v.registration).join(', '))
 
     _fleetCache  = { ok: true, vehicles, matched, count: vehicles.length, fetched_at: new Date().toISOString() }
     _fleetCacheTs = now
