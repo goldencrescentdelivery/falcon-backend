@@ -270,48 +270,105 @@ router.post('/bulk', auth, requireRole('admin','general_manager','manager'), asy
     if (employees.length > 300)
       return res.status(400).json({ error: 'Maximum 300 employees per import' })
 
+    // Parse DD-Mon-YY, DD-Mon-YYYY and YYYY-MM-DD
+    const MONTHS = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12}
+    function flexDate(val) {
+      if (!val || !String(val).trim()) return null
+      const s = String(val).trim()
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+      const m = s.match(/^(\d{1,2})[\/\-]([a-zA-Z]{3})[\/\-](\d{2,4})$/)
+      if (m) {
+        const day = m[1].padStart(2,'0')
+        const monNum = MONTHS[m[2].toLowerCase()]
+        if (!monNum) return null
+        const mon = String(monNum).padStart(2,'0')
+        let yr = parseInt(m[3])
+        if (yr < 100) yr += (yr > 25 ? 1900 : 2000)
+        return `${yr}-${mon}-${day}`
+      }
+      return null
+    }
+    // Pick first non-empty value across multiple key aliases
+    function pick(e, ...keys) {
+      for (const k of keys) {
+        const v = e[k]
+        if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim()
+      }
+      return null
+    }
+
     const bcrypt = require('bcryptjs')
     const results = { inserted: 0, skipped: 0, errors: [] }
 
-    for (const e of employees) {
-      const empId = (e.id || '').toString().trim()
-      const name  = (e.name || '').toString().trim()
+    for (const raw of employees) {
+      // Normalize all incoming keys: lowercase + underscores (handles "Employee ID", "Contact_No" etc.)
+      const e = {}
+      for (const [k, v] of Object.entries(raw)) {
+        e[k.trim().toLowerCase().replace(/[\s\-]+/g,'_').replace(/[^a-z0-9_]/g,'')] = v
+      }
+
+      const empId = pick(e, 'id', 'employee_id') || ''
+      const name  = pick(e, 'name') || ''
       if (!empId || !name) {
-        results.errors.push({ id: empId || '(blank)', reason: 'id and name are required' })
+        results.errors.push({ id: empId || '(blank)', reason: 'Employee ID and Name are required' })
         results.skipped++
         continue
       }
-      const sc = (e.station_code || 'DDB6').toString().trim()
+
+      const sc         = pick(e, 'station_code','station') || 'DDB6'
+      const phone      = pick(e, 'phone','contact_no','mobile')
+      const emiratesId = pick(e, 'emirates_id','emirates_id_no')
+      const loginEmail = pick(e, 'login_email','email_id')
+      const loginPass  = pick(e, 'login_password','password')
+
       try {
         const r = await query(`
           INSERT INTO employees
             (id,name,role,dept,status,salary,joined,phone,nationality,
              amazon_id,hourly_rate,station_code,visa_expiry,license_expiry,
-             annual_leave_balance,project_type,per_shipment_rate,performance_bonus,visa_type,avatar)
-          VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$11,$12,$13,30,'pulser',0.5,0,'company','👤')
+             annual_leave_balance,project_type,per_shipment_rate,performance_bonus,visa_type,avatar,
+             dob,marital_status,emirates_id,emirates_issuing_visa,
+             residential_location,work_location,passport_no,email_id,visa_file_no)
+          VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$11,$12,$13,30,'pulser',0.5,0,'company','👤',
+                  $14,$15,$16,$17,$18,$19,$20,$21,$22)
           ON CONFLICT (id) DO NOTHING
           RETURNING id
         `, [
           empId, name,
-          (e.role || 'Driver').toString().trim(),
-          (e.dept || 'Operations').toString().trim(),
+          pick(e,'role') || 'Driver',
+          pick(e,'dept') || 'Operations',
           Number(e.salary) || 0,
-          e.joined || null, e.phone || null, e.nationality || null, e.amazon_id || null,
-          Number(e.hourly_rate) || 3.85, sc,
-          e.visa_expiry || null, e.license_expiry || null,
+          flexDate(e.joined),
+          phone,
+          pick(e,'nationality'),
+          pick(e,'amazon_id'),
+          Number(e.hourly_rate) || 3.85,
+          sc,
+          flexDate(e.visa_expiry),
+          flexDate(e.license_expiry),
+          flexDate(e.dob),
+          pick(e,'marital_status'),
+          emiratesId,
+          pick(e,'emirates_issuing_visa'),
+          pick(e,'residential_location'),
+          pick(e,'work_location'),
+          pick(e,'passport_no'),
+          loginEmail,   // stored as email_id on the employee record
+          pick(e,'visa_file_no'),
         ])
 
         if (r.rows.length === 0) { results.skipped++; continue }
         results.inserted++
 
-        if (e.login_email && e.login_password && String(e.login_password).length >= 6) {
+        // Create driver login account when email + password are provided
+        if (loginEmail && loginPass && String(loginPass).length >= 4) {
           try {
-            const hash = await bcrypt.hash(String(e.login_password), 12)
+            const hash = await bcrypt.hash(String(loginPass), 12)
             const u = await query(`
               INSERT INTO users (email,password_hash,name,role,emp_id,station_code,status)
               VALUES ($1,$2,$3,'driver',$4,$5,'active')
               ON CONFLICT (email) DO NOTHING RETURNING id
-            `, [e.login_email.trim().toLowerCase(), hash, name, empId, sc])
+            `, [loginEmail.trim().toLowerCase(), hash, name, empId, sc])
             if (u.rows[0]) await query('UPDATE employees SET user_id=$1 WHERE id=$2', [u.rows[0].id, empId])
           } catch (ue) {
             results.errors.push({ id: empId, reason: `Inserted but login failed: ${ue.message}` })
