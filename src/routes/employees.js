@@ -321,6 +321,13 @@ router.post('/bulk', auth, requireRole('admin','general_manager','manager'), asy
       const loginEmail = pick(e, 'login_email','email_id')
       const loginPass  = pick(e, 'login_password','password')
 
+      // Normalise role: DA / Delivery Associate / D.A. → Driver
+      const rawRole = pick(e,'role') || 'Driver'
+      const roleNorm = rawRole.toLowerCase().replace(/[\.\s]/g,'')
+      const role = (roleNorm==='da'||roleNorm==='deliveryassociate'||roleNorm==='driver') ? 'Driver'
+                 : (roleNorm==='helper'||roleNorm==='hlp') ? 'Helper'
+                 : 'Driver' // default all bulk-imported staff to Driver
+
       try {
         const r = await query(`
           INSERT INTO employees
@@ -335,7 +342,7 @@ router.post('/bulk', auth, requireRole('admin','general_manager','manager'), asy
           RETURNING id
         `, [
           empId, name,
-          pick(e,'role') || 'Driver',
+          role,
           pick(e,'dept') || 'Operations',
           Number(e.salary) || 0,
           flexDate(e.joined),
