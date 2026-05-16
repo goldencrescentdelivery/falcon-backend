@@ -72,6 +72,8 @@ router.get('/fleet', auth, async (_req, res) => {
       }
     })
 
+    console.log('[cartrack] registrations from API:', vehicles.map(v => v.registration).join(', '))
+
     _fleetCache  = { ok: true, vehicles, count: vehicles.length, fetched_at: new Date().toISOString() }
     _fleetCacheTs = now
     res.set('X-Cache', 'MISS')
