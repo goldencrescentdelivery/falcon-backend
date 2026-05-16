@@ -261,6 +261,72 @@ router.post('/:id/create-user', auth, requireRole('admin','manager','general_man
   }
 })
 
+// POST /api/employees/bulk — CSV bulk import with optional login creation
+router.post('/bulk', auth, requireRole('admin','general_manager','manager'), async (req, res) => {
+  try {
+    const { employees } = req.body
+    if (!Array.isArray(employees) || employees.length === 0)
+      return res.status(400).json({ error: 'employees array required' })
+    if (employees.length > 300)
+      return res.status(400).json({ error: 'Maximum 300 employees per import' })
+
+    const bcrypt = require('bcryptjs')
+    const results = { inserted: 0, skipped: 0, errors: [] }
+
+    for (const e of employees) {
+      const empId = (e.id || '').toString().trim()
+      const name  = (e.name || '').toString().trim()
+      if (!empId || !name) {
+        results.errors.push({ id: empId || '(blank)', reason: 'id and name are required' })
+        results.skipped++
+        continue
+      }
+      const sc = (e.station_code || 'DDB6').toString().trim()
+      try {
+        const r = await query(`
+          INSERT INTO employees
+            (id,name,role,dept,status,salary,joined,phone,nationality,
+             amazon_id,hourly_rate,station_code,visa_expiry,license_expiry,
+             annual_leave_balance,project_type,per_shipment_rate,performance_bonus,visa_type,avatar)
+          VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$11,$12,$13,30,'pulser',0.5,0,'company','👤')
+          ON CONFLICT (id) DO NOTHING
+          RETURNING id
+        `, [
+          empId, name,
+          (e.role || 'Driver').toString().trim(),
+          (e.dept || 'Operations').toString().trim(),
+          Number(e.salary) || 0,
+          e.joined || null, e.phone || null, e.nationality || null, e.amazon_id || null,
+          Number(e.hourly_rate) || 3.85, sc,
+          e.visa_expiry || null, e.license_expiry || null,
+        ])
+
+        if (r.rows.length === 0) { results.skipped++; continue }
+        results.inserted++
+
+        if (e.login_email && e.login_password && String(e.login_password).length >= 6) {
+          try {
+            const hash = await bcrypt.hash(String(e.login_password), 12)
+            const u = await query(`
+              INSERT INTO users (email,password_hash,name,role,emp_id,station_code,status)
+              VALUES ($1,$2,$3,'driver',$4,$5,'active')
+              ON CONFLICT (email) DO NOTHING RETURNING id
+            `, [e.login_email.trim().toLowerCase(), hash, name, empId, sc])
+            if (u.rows[0]) await query('UPDATE employees SET user_id=$1 WHERE id=$2', [u.rows[0].id, empId])
+          } catch (ue) {
+            results.errors.push({ id: empId, reason: `Inserted but login failed: ${ue.message}` })
+          }
+        }
+      } catch (ie) {
+        results.errors.push({ id: empId, reason: ie.message })
+        results.skipped++
+      }
+    }
+
+    res.json({ ok: true, ...results })
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
+})
+
 router.delete('/:id', auth, requireRole('admin'), async (req, res) => {
   try {
     const eid = req.params.id
