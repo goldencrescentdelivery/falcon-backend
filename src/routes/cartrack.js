@@ -1,5 +1,6 @@
 const router = require('express').Router()
 const { auth } = require('../middleware/auth')
+const { query } = require('../db/pool')
 
 const CT_BASE = 'https://fleetapi-me.cartrack.com/rest'
 const CT_USER = process.env.CARTRACK_USER || 'FALC00005'
@@ -123,6 +124,55 @@ router.get('/events', auth, async (req, res) => {
   } catch (err) {
     console.error('[cartrack] events error:', err.message)
     res.status(502).json({ error: 'Cartrack unavailable' })
+  }
+})
+
+// GET /api/cartrack/debug — compare Cartrack registrations vs DB plates (admin only)
+router.get('/debug', auth, async (_req, res) => {
+  try {
+    const norm   = s => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+    const suffix = s => norm(s).replace(/^(DXB|AUH|AJM|SHJ|RAK|UAQ|FUJ)/, '')
+
+    const [ctData, dbResult] = await Promise.all([
+      ctFetch('/vehicles'),
+      query('SELECT plate FROM vehicles ORDER BY plate'),
+    ])
+
+    const ctPlates = (ctData.data || []).map(v => ({
+      raw:    v.registration,
+      norm:   norm(v.registration),
+      suffix: suffix(v.registration),
+    }))
+
+    const dbPlates = dbResult.rows.map(r => ({
+      raw:    r.plate,
+      norm:   norm(r.plate),
+      suffix: suffix(r.plate),
+    }))
+
+    // Build lookup sets
+    const ctNorms   = new Set(ctPlates.map(p => p.norm))
+    const ctSuffixes = new Set(ctPlates.map(p => p.suffix))
+
+    const matched   = dbPlates.filter(p => ctNorms.has(p.norm) || ctSuffixes.has(p.suffix))
+    const unmatched = dbPlates.filter(p => !ctNorms.has(p.norm) && !ctSuffixes.has(p.suffix))
+
+    // Log to Railway console for debugging
+    console.log('[cartrack/debug] CT plates:', ctPlates.map(p => p.raw).join(', '))
+    console.log('[cartrack/debug] DB plates (first 20):', dbPlates.slice(0, 20).map(p => p.raw).join(', '))
+    console.log(`[cartrack/debug] Matched: ${matched.length}/${dbPlates.length}`)
+
+    res.json({
+      ct_count:        ctPlates.length,
+      db_count:        dbPlates.length,
+      matched_count:   matched.length,
+      ct_plates:       ctPlates,
+      matched_db:      matched,
+      unmatched_db:    unmatched.slice(0, 30),
+    })
+  } catch (err) {
+    console.error('[cartrack/debug]', err.message)
+    res.status(502).json({ error: err.message })
   }
 })
 
