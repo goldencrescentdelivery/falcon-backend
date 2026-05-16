@@ -16,12 +16,16 @@ async function ctFetch(path) {
   return res.json()
 }
 
+// Plate normalisation helpers
+const normPlate   = s => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+const normSuffix  = s => normPlate(s).replace(/^(DXB|AUH|AJM|SHJ|RAK|UAQ|FUJ)/, '')
+
 // ── In-memory cache (shared across all requests, 60 s TTL) ──────
 let _fleetCache = null
 let _fleetCacheTs = 0
 const FLEET_TTL = 60_000
 
-// GET /api/cartrack/fleet — merged vehicle list + live status, 60 s cached
+// GET /api/cartrack/fleet — Cartrack data matched to DB vehicles by plate/VIN, 60 s cached
 router.get('/fleet', auth, async (_req, res) => {
   const now = Date.now()
   if (_fleetCache && now - _fleetCacheTs < FLEET_TTL) {
@@ -29,17 +33,20 @@ router.get('/fleet', auth, async (_req, res) => {
     return res.json(_fleetCache)
   }
   try {
-    const [vehs, status] = await Promise.all([
+    // Fetch Cartrack + DB in parallel
+    const [vehs, status, dbRows] = await Promise.all([
       ctFetch('/vehicles'),
       ctFetch('/vehicles/status'),
+      query('SELECT id, plate, vin FROM vehicles'),
     ])
 
     const sm = {}
     for (const s of (status.data || [])) sm[s.vehicle_id] = s
 
+    // Build enriched Cartrack vehicle list
     const vehicles = (vehs.data || []).map(v => {
-      const s   = sm[v.vehicle_id] || {}
-      const loc = s.location || {}
+      const s    = sm[v.vehicle_id] || {}
+      const loc  = s.location || {}
       const fuel = s.fuel || {}
       return {
         vehicle_id:       v.vehicle_id,
@@ -51,7 +58,6 @@ router.get('/fleet', auth, async (_req, res) => {
         colour:           v.colour,
         chassis:          v.chassis_number,
         in_maintenance:   !!(v.is_under_maintenance || v.terminal_in_repair),
-        // Live telemetry
         has_gps:          !!s.event_ts,
         last_update:      s.event_ts    || null,
         ignition:         s.ignition    ?? null,
@@ -61,20 +67,41 @@ router.get('/fleet', auth, async (_req, res) => {
         odometer:         s.odometer    ? Math.round(s.odometer / 1000) : null,
         fuel_pct:         fuel.precentage_left ?? null,
         fuel_level:       fuel.level    ?? null,
-        // Location
         lat:              loc.latitude  ?? null,
         lng:              loc.longitude ?? null,
         location_address: loc.position_description || null,
         location_updated: loc.updated  || null,
-        // Cartrack assigned driver
         driver_name:  s.driver ? [s.driver.first_name, s.driver.last_name].filter(Boolean).join(' ') : null,
         driver_phone: s.driver?.phone_number || null,
       }
     })
 
-    console.log('[cartrack] registrations from API:', vehicles.map(v => v.registration).join(', '))
+    // Build lookup maps from Cartrack side
+    const byPlate   = {}   // normPlate(registration) → vehicle
+    const bySuffix  = {}   // normSuffix(registration) → vehicle
+    const byVin     = {}   // upper VIN → vehicle
+    for (const veh of vehicles) {
+      if (veh.registration) {
+        byPlate[normPlate(veh.registration)]  = veh
+        bySuffix[normSuffix(veh.registration)] = veh
+      }
+      if (veh.chassis) byVin[String(veh.chassis).trim().toUpperCase()] = veh
+    }
 
-    _fleetCache  = { ok: true, vehicles, count: vehicles.length, fetched_at: new Date().toISOString() }
+    // Match each DB vehicle to a Cartrack vehicle
+    const matched = {}  // db_uuid → cartrack vehicle data
+    for (const row of dbRows.rows) {
+      const ct =
+        byPlate[normPlate(row.plate)] ||
+        bySuffix[normSuffix(row.plate)] ||
+        (row.vin ? byVin[String(row.vin).trim().toUpperCase()] : null)
+      if (ct) matched[row.id] = ct
+    }
+
+    console.log(`[cartrack] ${vehicles.length} CT vehicles, ${Object.keys(matched).length}/${dbRows.rows.length} DB matched`)
+    console.log('[cartrack] registrations:', vehicles.map(v => v.registration).join(', '))
+
+    _fleetCache  = { ok: true, vehicles, matched, count: vehicles.length, fetched_at: new Date().toISOString() }
     _fleetCacheTs = now
     res.set('X-Cache', 'MISS')
     res.json(_fleetCache)
