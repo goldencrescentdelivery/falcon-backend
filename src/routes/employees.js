@@ -275,16 +275,20 @@ router.post('/bulk', auth, requireRole('admin','general_manager','manager'), asy
     function flexDate(val) {
       if (!val || !String(val).trim()) return null
       const s = String(val).trim()
+      // Already ISO YYYY-MM-DD
       if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
-      const m = s.match(/^(\d{1,2})[\/\-]([a-zA-Z]{3})[\/\-](\d{2,4})$/)
-      if (m) {
-        const day = m[1].padStart(2,'0')
-        const monNum = MONTHS[m[2].toLowerCase()]
+      function fix2(yr) { return yr < 100 ? yr + (yr >= 50 ? 1900 : 2000) : yr }
+      // DD-Mon-YY(YY)  e.g. 15-Jan-26 or 15/Jan/2027
+      const m1 = s.match(/^(\d{1,2})[\/\-]([a-zA-Z]{3})[\/\-](\d{2,4})$/)
+      if (m1) {
+        const monNum = MONTHS[m1[2].toLowerCase()]
         if (!monNum) return null
-        const mon = String(monNum).padStart(2,'0')
-        let yr = parseInt(m[3])
-        if (yr < 100) yr += (yr > 25 ? 1900 : 2000)
-        return `${yr}-${mon}-${day}`
+        return `${fix2(parseInt(m1[3]))}-${String(monNum).padStart(2,'0')}-${m1[1].padStart(2,'0')}`
+      }
+      // DD/MM/YY(YY) or DD-MM-YY(YY)  e.g. 15/01/26 or 31-12-2027
+      const m2 = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/)
+      if (m2) {
+        return `${fix2(parseInt(m2[3]))}-${m2[2].padStart(2,'0')}-${m2[1].padStart(2,'0')}`
       }
       return null
     }
