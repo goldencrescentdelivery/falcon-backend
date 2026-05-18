@@ -298,7 +298,7 @@ router.post('/bulk', auth, requireRole('admin','general_manager','manager'), asy
     }
 
     const bcrypt = require('bcryptjs')
-    const results = { inserted: 0, skipped: 0, errors: [] }
+    const results = { inserted: 0, updated: 0, errors: [] }
 
     for (const raw of employees) {
       // Normalize all incoming keys: lowercase + underscores (handles "Employee ID", "Contact_No" etc.)
@@ -311,7 +311,6 @@ router.post('/bulk', auth, requireRole('admin','general_manager','manager'), asy
       const name  = pick(e, 'name') || ''
       if (!empId || !name) {
         results.errors.push({ id: empId || '(blank)', reason: 'Employee ID and Name are required' })
-        results.skipped++
         continue
       }
 
@@ -332,14 +331,39 @@ router.post('/bulk', auth, requireRole('admin','general_manager','manager'), asy
         const r = await query(`
           INSERT INTO employees
             (id,name,role,dept,status,salary,joined,phone,nationality,
-             amazon_id,hourly_rate,station_code,visa_expiry,license_expiry,
+             amazon_id,amazon_transporter_id,hourly_rate,station_code,
+             visa_expiry,license_expiry,iloe_expiry,
              annual_leave_balance,project_type,per_shipment_rate,performance_bonus,visa_type,avatar,
              dob,marital_status,emirates_id,emirates_issuing_visa,
              residential_location,work_location,passport_no,email_id,visa_file_no)
-          VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$11,$12,$13,30,'pulser',0.5,0,'company','👤',
-                  $14,$15,$16,$17,$18,$19,$20,$21,$22)
-          ON CONFLICT (id) DO NOTHING
-          RETURNING id
+          VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+                  30,'pulser',0.5,0,'company','👤',
+                  $16,$17,$18,$19,$20,$21,$22,$23,$24)
+          ON CONFLICT (id) DO UPDATE SET
+            name                  = EXCLUDED.name,
+            role                  = EXCLUDED.role,
+            dept                  = EXCLUDED.dept,
+            phone                 = EXCLUDED.phone,
+            nationality           = EXCLUDED.nationality,
+            amazon_id             = EXCLUDED.amazon_id,
+            amazon_transporter_id = EXCLUDED.amazon_transporter_id,
+            hourly_rate           = EXCLUDED.hourly_rate,
+            station_code          = EXCLUDED.station_code,
+            joined                = COALESCE(EXCLUDED.joined, employees.joined),
+            visa_expiry           = EXCLUDED.visa_expiry,
+            license_expiry        = EXCLUDED.license_expiry,
+            iloe_expiry           = EXCLUDED.iloe_expiry,
+            dob                   = EXCLUDED.dob,
+            marital_status        = EXCLUDED.marital_status,
+            emirates_id           = EXCLUDED.emirates_id,
+            emirates_issuing_visa = EXCLUDED.emirates_issuing_visa,
+            residential_location  = EXCLUDED.residential_location,
+            work_location         = EXCLUDED.work_location,
+            passport_no           = EXCLUDED.passport_no,
+            email_id              = EXCLUDED.email_id,
+            visa_file_no          = EXCLUDED.visa_file_no,
+            updated_at            = NOW()
+          RETURNING id, (xmax::bigint > 0) AS was_updated
         `, [
           empId, name,
           role,
@@ -349,10 +373,12 @@ router.post('/bulk', auth, requireRole('admin','general_manager','manager'), asy
           phone,
           pick(e,'nationality'),
           pick(e,'amazon_id'),
+          pick(e,'amazon_transporter_id'),
           Number(e.hourly_rate) || 3.85,
           sc,
           flexDate(e.visa_expiry),
           flexDate(e.license_expiry),
+          flexDate(pick(e,'iloe_expiry','iloe_expire')),
           flexDate(e.dob),
           pick(e,'marital_status'),
           emiratesId,
@@ -364,10 +390,9 @@ router.post('/bulk', auth, requireRole('admin','general_manager','manager'), asy
           pick(e,'visa_file_no'),
         ])
 
-        if (r.rows.length === 0) { results.skipped++; continue }
-        results.inserted++
+        if (r.rows[0]?.was_updated) { results.updated++ } else { results.inserted++ }
 
-        // Create driver login account when email + password are provided
+        // Create driver login account when email + password are provided (idempotent)
         if (loginEmail && loginPass && String(loginPass).length >= 4) {
           try {
             const hash = await bcrypt.hash(String(loginPass), 12)
@@ -378,12 +403,11 @@ router.post('/bulk', auth, requireRole('admin','general_manager','manager'), asy
             `, [loginEmail.trim().toLowerCase(), hash, name, empId, sc])
             if (u.rows[0]) await query('UPDATE employees SET user_id=$1 WHERE id=$2', [u.rows[0].id, empId])
           } catch (ue) {
-            results.errors.push({ id: empId, reason: `Inserted but login failed: ${ue.message}` })
+            results.errors.push({ id: empId, reason: `Saved but login failed: ${ue.message}` })
           }
         }
       } catch (ie) {
         results.errors.push({ id: empId, reason: ie.message })
-        results.skipped++
       }
     }
 
