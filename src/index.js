@@ -269,6 +269,11 @@ async function autoMigrate() {
     await query(`CREATE INDEX IF NOT EXISTS idx_letters_created ON office_letters(created_at DESC)`)
   } catch(e) { console.warn('migrate office_letters:', e.message) }
 
+  // users — manager_type (migrate21)
+  try {
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS manager_type TEXT`)
+  } catch(e) { console.warn('migrate users manager_type:', e.message) }
+
   // employees — amazon_transporter_id (migrate20)
   try {
     await query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS amazon_transporter_id TEXT`)
