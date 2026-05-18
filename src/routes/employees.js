@@ -363,7 +363,7 @@ router.post('/bulk', auth, requireRole('admin','general_manager','manager'), asy
             email_id              = EXCLUDED.email_id,
             visa_file_no          = EXCLUDED.visa_file_no,
             updated_at            = NOW()
-          RETURNING id, (xmax::bigint > 0) AS was_updated
+          RETURNING id, (xmax::text::bigint > 0) AS was_updated
         `, [
           empId, name,
           role,
