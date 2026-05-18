@@ -170,7 +170,10 @@ router.post('/users', verifyToken, role('admin','manager','general_manager'), as
     res.status(201).json({ user: r.rows[0] })
   } catch(e) {
     console.error('CREATE USER ERROR:', e.message, e.stack)
-    if (e.code === '23505') return res.status(409).json({ error:'Email already exists' })
+    if (e.code === '23505') {
+      const ex = await query(`SELECT id FROM users WHERE email=$1`, [email]).catch(()=>({rows:[]}))
+      return res.status(409).json({ error:'Email already exists', existing_user_id: ex.rows[0]?.id || null })
+    }
     if (e.code === '23514') return res.status(400).json({ error:'Invalid role — run database migration first' })
     res.status(500).json({ error:'Server error: '+e.message })
   }
