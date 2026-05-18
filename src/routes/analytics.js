@@ -2,39 +2,63 @@ const router  = require('express').Router()
 const { query } = require('../db/pool')
 const { auth, requireRole } = require('../middleware/auth')
 
+// 30-second in-memory cache for summary
+let _summaryCache = null
+let _summaryCacheTs = 0
+const SUMMARY_TTL = 30_000
+
 router.get('/summary', auth, requireRole('admin','manager','general_manager','hr','accountant','finance'), async (req, res) => {
+  const now = Date.now()
+  if (_summaryCache && now - _summaryCacheTs < SUMMARY_TTL) {
+    return res.set('X-Cache','HIT').json(_summaryCache)
+  }
   try {
-    const [empCount, attToday, pendingLeaves, pendingFines, todayDeliveries] = await Promise.all([
-      query(`SELECT COUNT(*) c, COUNT(*) FILTER (WHERE status='active') active FROM employees WHERE LOWER(role)='driver'`),
+    const payrollMonth = new Date().toISOString().slice(0,7)
+    const [empCount, attToday, pendingLeaves, pendingFines, todayDeliveries, payroll] = await Promise.all([
+      query(`SELECT
+               COUNT(*) c,
+               COUNT(*) FILTER (WHERE status='active')   active,
+               COUNT(*) FILTER (WHERE status='on_leave') on_leave,
+               COUNT(*) FILTER (WHERE status='inactive') inactive
+             FROM employees WHERE LOWER(role)='driver'`),
       query(`SELECT COUNT(*) FILTER (WHERE status='present') present, COUNT(*) FILTER (WHERE status='absent') absent FROM attendance WHERE date=CURRENT_DATE`),
       query(`SELECT COUNT(*) c FROM leaves WHERE status='pending'`),
       query(`SELECT COUNT(*) c, COALESCE(SUM(amount),0) total FROM compliance_fines WHERE status='pending'`),
       query(`SELECT COALESCE(SUM(total),0) total FROM daily_deliveries WHERE date=CURRENT_DATE`).catch(()=>({rows:[{total:0}]})),
+      query(`
+        SELECT COALESCE(SUM(e.salary),0) base_total,
+          COALESCE(SUM(sb.total),0) bonus_total, COALESCE(SUM(sd.total),0) ded_total
+        FROM employees e
+        LEFT JOIN (SELECT emp_id,SUM(amount) total FROM salary_bonuses WHERE month=$1 GROUP BY emp_id) sb ON e.id=sb.emp_id
+        LEFT JOIN (SELECT emp_id,SUM(amount) total FROM salary_deductions WHERE month=$1 GROUP BY emp_id) sd ON e.id=sd.emp_id
+        WHERE e.status!='inactive'`, [payrollMonth]),
     ])
-    const payrollMonth = new Date().toISOString().slice(0,7)
-    const payroll = await query(`
-      SELECT COALESCE(SUM(e.salary),0) base_total,
-        COALESCE(SUM(sb.total),0) bonus_total, COALESCE(SUM(sd.total),0) ded_total
-      FROM employees e
-      LEFT JOIN (SELECT emp_id,SUM(amount) total FROM salary_bonuses WHERE month=$1 GROUP BY emp_id) sb ON e.id=sb.emp_id
-      LEFT JOIN (SELECT emp_id,SUM(amount) total FROM salary_deductions WHERE month=$1 GROUP BY emp_id) sd ON e.id=sd.emp_id
-      WHERE e.status!='inactive'`, [payrollMonth])
-    res.json({
+    const body = {
       employees:        empCount.rows[0],
       attendance:       attToday.rows[0],
       pending_leaves:   pendingLeaves.rows[0].c,
       today_deliveries: parseInt(todayDeliveries.rows[0].total||0),
       compliance: { pending_fines: pendingFines.rows[0].c, pending_amount: pendingFines.rows[0].total },
       payroll: payroll.rows[0],
-    })
+    }
+    _summaryCache = body
+    _summaryCacheTs = now
+    res.set('X-Cache','MISS').json(body)
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
 // GET /api/analytics/deliveries-chart?months=6
+let _chartCache = {}
+const CHART_TTL = 120_000 // 2-min cache — chart data changes infrequently
+
 router.get('/deliveries-chart', auth, requireRole('admin','manager','general_manager','hr','accountant','finance'), async (req, res) => {
+  const months = parseInt(req.query.months) || 6
+  const cacheKey = `chart_${months}`
+  const now = Date.now()
+  if (_chartCache[cacheKey] && now - _chartCache[cacheKey].ts < CHART_TTL) {
+    return res.set('X-Cache','HIT').json(_chartCache[cacheKey].data)
+  }
   try {
-    const months = parseInt(req.query.months) || 6
-    // Calculate cutoff in JS to avoid PostgreSQL INTERVAL syntax issues
     const cutoff = new Date()
     cutoff.setMonth(cutoff.getMonth() - months)
     const cutoffStr = cutoff.toISOString().slice(0, 10)
@@ -43,9 +67,7 @@ router.get('/deliveries-chart', auth, requireRole('admin','manager','general_man
       SELECT
         TO_CHAR(date, 'YYYY-MM') AS mon,
         station_code,
-        SUM(total)               AS total_deliveries,
-        SUM(successful)          AS successful,
-        SUM(returned)            AS returned
+        SUM(total)               AS total_deliveries
       FROM daily_deliveries
       WHERE date >= $1
       GROUP BY TO_CHAR(date, 'YYYY-MM'), station_code
@@ -58,7 +80,9 @@ router.get('/deliveries-chart', auth, requireRole('admin','manager','general_man
       map[r.mon][r.station_code] = parseInt(r.total_deliveries)
       map[r.mon].total += parseInt(r.total_deliveries)
     }
-    res.json({ chart: Object.values(map) })
+    const data = { chart: Object.values(map) }
+    _chartCache[cacheKey] = { data, ts: now }
+    res.set('X-Cache','MISS').json(data)
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }) }
 })
 
